@@ -175,6 +175,7 @@ class TradeCopier
 
             $position->shares = $newShares;
             $position->exposure = ($position->exposure ?? 0) + $fixedAmountUsdc;
+            $position->copied_from_wallet = $trade->wallet;
 
             // Only set opened_at on the first buy.
             if (! $position->opened_at || $oldShares <= 0) {
@@ -390,13 +391,15 @@ class TradeCopier
         $summary->updated_at = now();
         $summary->save();
 
-        // Get opened_at from the position.
+        // Get opened_at and copied_from_wallet from the position.
         $position = Position::where('asset_id', $assetId)->first();
         $openedAt = $position?->opened_at;
+        $copiedFromWallet = $position?->copied_from_wallet;
 
         // Create history record.
         TradeHistory::create([
             'asset_id' => $assetId,
+            'copied_from_wallet' => $copiedFromWallet,
             'buy_price' => $buyPrice,
             'sell_price' => $sellPrice,
             'shares' => $shares,

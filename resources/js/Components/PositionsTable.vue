@@ -79,7 +79,18 @@ function statusBadge(status) {
     return null;
 }
 
+function traderLabel(p) {
+    return p.trader_name || (p.trader_wallet ? p.trader_wallet.slice(0, 8) + '...' : '-');
+}
+
+function traderUrl(p) {
+    if (p.trader_slug) return `https://polymarket.com/@${p.trader_slug}`;
+    if (p.trader_wallet) return `https://polymarket.com/portfolio/${p.trader_wallet}`;
+    return null;
+}
+
 const columns = [
+    { key: 'trader_name', label: 'Trader' },
     { key: 'asset_id', label: 'Asset' },
     { key: 'shares', label: 'Shares' },
     { key: 'buy_price', label: 'Buy Price' },
@@ -107,9 +118,16 @@ const columns = [
             </thead>
             <tbody>
                 <tr v-if="positions.length === 0">
-                    <td colspan="10" class="text-gray-500 px-3 py-2">No open positions</td>
+                    <td colspan="11" class="text-gray-500 px-3 py-2">No open positions</td>
                 </tr>
                 <tr v-for="p in paged" :key="p.asset_id" class="hover:bg-gray-900">
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
+                        <a v-if="traderUrl(p)" :href="traderUrl(p)" target="_blank"
+                           class="text-blue-400 hover:text-blue-300 hover:underline">
+                            {{ traderLabel(p) }}
+                        </a>
+                        <span v-else class="text-gray-500">-</span>
+                    </td>
                     <td class="px-3 py-2 border-b border-gray-800 font-mono text-xs text-gray-500">{{ shortId(p.asset_id) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.shares.toFixed(2) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ p.buy_price.toFixed(2) }}</td>

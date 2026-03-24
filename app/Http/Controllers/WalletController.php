@@ -27,12 +27,42 @@ class WalletController extends Controller
             return response()->json(['error' => 'Wallet already tracked'], 400);
         }
 
-        TrackedWallet::create(['address' => $wallet]);
+        $name = trim($request->input('name', ''));
+        $profileSlug = trim($request->input('profile_slug', ''));
+
+        TrackedWallet::create([
+            'address' => $wallet,
+            'name' => $name ?: null,
+            'profile_slug' => $profileSlug ?: null,
+        ]);
 
         return response()->json([
             'ok' => true,
             'wallets' => TrackedWallet::count(),
         ]);
+    }
+
+    /**
+     * Update a tracked wallet's name and profile slug.
+     */
+    public function update(Request $request): JsonResponse
+    {
+        $wallet = strtolower(trim($request->input('wallet', '')));
+
+        $record = TrackedWallet::where('address', $wallet)->first();
+        if (! $record) {
+            return response()->json(['error' => 'Wallet not found'], 400);
+        }
+
+        $name = trim($request->input('name', ''));
+        $profileSlug = trim($request->input('profile_slug', ''));
+
+        $record->update([
+            'name' => $name ?: null,
+            'profile_slug' => $profileSlug ?: null,
+        ]);
+
+        return response()->json(['ok' => true]);
     }
 
     /**

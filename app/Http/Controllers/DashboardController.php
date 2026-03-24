@@ -30,6 +30,12 @@ class DashboardController extends Controller
         $totalUnrealized = 0.0;
         $totalCost = 0.0;
 
+        // Build a wallet lookup: address -> {name, profile_slug}
+        $walletLookup = TrackedWallet::all()->keyBy('address')->map(fn ($w) => [
+            'name' => $w->name,
+            'profile_slug' => $w->profile_slug,
+        ])->all();
+
         foreach (Position::where('shares', '>', 0)->get() as $pos) {
             $buyPrice = (float) $pos->buy_price;
             $shares = (float) $pos->shares;
@@ -39,6 +45,9 @@ class DashboardController extends Controller
 
             $currentValue = $currentPrice !== null ? $currentPrice * $shares : null;
             $unrealized = $currentValue !== null ? $currentValue - $cost : null;
+
+            $wallet = $pos->copied_from_wallet;
+            $traderInfo = $wallet ? ($walletLookup[$wallet] ?? null) : null;
 
             $positions[] = [
                 'asset_id' => $pos->asset_id,
@@ -50,6 +59,9 @@ class DashboardController extends Controller
                 'unrealized_pnl' => $unrealized !== null ? round($unrealized, 4) : null,
                 'opened_at' => $pos->opened_at?->timestamp ?? 0,
                 'status' => $status,
+                'trader_name' => $traderInfo['name'] ?? null,
+                'trader_slug' => $traderInfo['profile_slug'] ?? null,
+                'trader_wallet' => $wallet,
             ];
 
             if ($unrealized !== null) {
@@ -65,15 +77,23 @@ class DashboardController extends Controller
         $recentTrades = TradeHistory::orderBy('id', 'desc')
             ->limit(500)
             ->get()
-            ->map(fn ($t) => [
-                'asset_id' => $t->asset_id,
-                'buy_price' => (float) $t->buy_price,
-                'sell_price' => (float) $t->sell_price,
-                'shares' => (float) $t->shares,
-                'pnl' => (float) $t->pnl,
-                'opened_at' => $t->opened_at?->timestamp ?? 0,
-                'closed_at' => $t->closed_at?->timestamp ?? 0,
-            ])
+            ->map(function ($t) use ($walletLookup) {
+                $wallet = $t->copied_from_wallet;
+                $traderInfo = $wallet ? ($walletLookup[$wallet] ?? null) : null;
+
+                return [
+                    'asset_id' => $t->asset_id,
+                    'buy_price' => (float) $t->buy_price,
+                    'sell_price' => (float) $t->sell_price,
+                    'shares' => (float) $t->shares,
+                    'pnl' => (float) $t->pnl,
+                    'opened_at' => $t->opened_at?->timestamp ?? 0,
+                    'closed_at' => $t->closed_at?->timestamp ?? 0,
+                    'trader_name' => $traderInfo['name'] ?? null,
+                    'trader_slug' => $traderInfo['profile_slug'] ?? null,
+                    'trader_wallet' => $wallet,
+                ];
+            })
             ->values()
             ->all();
 
@@ -92,7 +112,11 @@ class DashboardController extends Controller
             'recent_trades' => $recentTrades,
             'dry_run' => config('polymarket.dry_run'),
             'tracked_wallets' => TrackedWallet::count(),
-            'tracked_wallets_list' => TrackedWallet::orderBy('id')->pluck('address')->all(),
+            'tracked_wallets_list' => TrackedWallet::orderBy('id')->get()->map(fn ($w) => [
+                'address' => $w->address,
+                'name' => $w->name,
+                'profile_slug' => $w->profile_slug,
+            ])->all(),
             'ts' => time(),
         ]);
     }

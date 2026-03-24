@@ -7,5 +7,6 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/data', [DashboardController::class, 'data']);
 Route::post('/wallets', [WalletController::class, 'store']);
+Route::put('/wallets', [WalletController::class, 'update']);
 Route::delete('/wallets', [WalletController::class, 'destroy']);
 Route::post('/close', [PositionController::class, 'close']);

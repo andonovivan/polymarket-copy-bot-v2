@@ -7,8 +7,13 @@ const emit = defineEmits(['refresh']);
 const PAGE_SIZE = 10;
 const page = ref(0);
 const walletInput = ref('');
+const nameInput = ref('');
+const slugInput = ref('');
 const msg = ref('');
 const msgIsError = ref(false);
+const editingWallet = ref(null);
+const editName = ref('');
+const editSlug = ref('');
 let msgTimeout = null;
 
 const paged = computed(() => props.wallets.slice(page.value * PAGE_SIZE, (page.value + 1) * PAGE_SIZE));
@@ -33,11 +38,17 @@ async function addWallet() {
         const r = await fetch('/api/wallets', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({wallet: addr}),
+            body: JSON.stringify({
+                wallet: addr,
+                name: nameInput.value.trim(),
+                profile_slug: slugInput.value.trim(),
+            }),
         });
         const d = await r.json();
         if (d.error) { showMsg(d.error, true); return; }
         walletInput.value = '';
+        nameInput.value = '';
+        slugInput.value = '';
         showMsg('Added ' + addr.slice(0, 8) + '...', false);
         emit('refresh');
     } catch(e) { showMsg('Failed to add wallet', true); }
@@ -57,18 +68,64 @@ async function removeWallet(addr) {
         emit('refresh');
     } catch(e) { showMsg('Failed to remove wallet', true); }
 }
+
+function startEdit(w) {
+    editingWallet.value = w.address;
+    editName.value = w.name || '';
+    editSlug.value = w.profile_slug || '';
+}
+
+function cancelEdit() {
+    editingWallet.value = null;
+}
+
+async function saveEdit(addr) {
+    try {
+        const r = await fetch('/api/wallets', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                wallet: addr,
+                name: editName.value.trim(),
+                profile_slug: editSlug.value.trim(),
+            }),
+        });
+        const d = await r.json();
+        if (d.error) { showMsg(d.error, true); return; }
+        editingWallet.value = null;
+        showMsg('Updated', false);
+        emit('refresh');
+    } catch(e) { showMsg('Failed to update', true); }
+}
+
+function profileUrl(w) {
+    if (w.profile_slug) return `https://polymarket.com/@${w.profile_slug}`;
+    return `https://polymarket.com/portfolio/${w.address}`;
+}
 </script>
 
 <template>
     <div>
-        <div class="flex gap-2 mb-4">
-            <input v-model="walletInput"
-                   @keyup.enter="addWallet"
-                   type="text"
-                   placeholder="0x... wallet address"
-                   class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500">
+        <div class="mb-4 p-4 bg-gray-900 border border-gray-700 rounded-lg">
+            <div class="flex gap-2 mb-2">
+                <input v-model="walletInput"
+                       @keyup.enter="addWallet"
+                       type="text"
+                       placeholder="0x... wallet address"
+                       class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="flex gap-2 mb-2">
+                <input v-model="nameInput"
+                       type="text"
+                       placeholder="Trader name (e.g. BeachBoy)"
+                       class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500">
+                <input v-model="slugInput"
+                       type="text"
+                       placeholder="Profile slug (e.g. beachboy4)"
+                       class="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500">
+            </div>
             <button @click="addWallet"
-                    class="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded text-sm whitespace-nowrap">
+                    class="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded text-sm whitespace-nowrap w-full">
                 Add Wallet
             </button>
         </div>
@@ -82,14 +139,56 @@ async function removeWallet(addr) {
         </div>
 
         <ul v-if="wallets.length > 0">
-            <li v-for="(w, i) in paged" :key="w"
-                class="flex items-center justify-between bg-gray-900 border border-gray-700 rounded-md px-4 py-3 mb-2 font-mono text-sm">
-                <span class="text-gray-600 text-xs mr-3 min-w-[24px]">#{{ offset + i + 1 }}</span>
-                <span class="text-gray-300 overflow-hidden text-ellipsis flex-1">{{ w }}</span>
-                <button @click="removeWallet(w)"
-                        class="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 rounded ml-3 shrink-0">
-                    Remove
-                </button>
+            <li v-for="(w, i) in paged" :key="w.address"
+                class="bg-gray-900 border border-gray-700 rounded-md px-4 py-3 mb-2">
+
+                <!-- View mode -->
+                <div v-if="editingWallet !== w.address" class="flex items-center justify-between">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-600 text-xs">#{{ offset + i + 1 }}</span>
+                            <a :href="profileUrl(w)" target="_blank"
+                               class="text-blue-400 hover:text-blue-300 hover:underline text-sm font-medium">
+                                {{ w.name || 'Unnamed' }}
+                            </a>
+                        </div>
+                        <div class="font-mono text-xs text-gray-500 mt-1 overflow-hidden text-ellipsis">{{ w.address }}</div>
+                        <div v-if="w.profile_slug" class="text-xs text-gray-600 mt-0.5">
+                            polymarket.com/@{{ w.profile_slug }}
+                        </div>
+                    </div>
+                    <div class="flex gap-2 ml-3 shrink-0">
+                        <button @click="startEdit(w)"
+                                class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded">
+                            Edit
+                        </button>
+                        <button @click="removeWallet(w.address)"
+                                class="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 rounded">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Edit mode -->
+                <div v-else>
+                    <div class="font-mono text-xs text-gray-500 mb-2">{{ w.address }}</div>
+                    <div class="flex gap-2 mb-2">
+                        <input v-model="editName" type="text" placeholder="Trader name"
+                               class="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-blue-500">
+                        <input v-model="editSlug" type="text" placeholder="Profile slug"
+                               class="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="flex gap-2">
+                        <button @click="saveEdit(w.address)"
+                                class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded">
+                            Save
+                        </button>
+                        <button @click="cancelEdit"
+                                class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
             </li>
         </ul>
         <p v-else class="text-gray-500 py-3">No wallets tracked. Add one above.</p>

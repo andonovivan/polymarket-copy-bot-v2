@@ -6,5 +6,5 @@ use Illuminate\Database\Eloquent\Model;
 
 class TrackedWallet extends Model
 {
-    protected $fillable = ['address'];
+    protected $fillable = ['address', 'name', 'profile_slug'];
 }

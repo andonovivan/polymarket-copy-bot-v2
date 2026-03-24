@@ -55,7 +55,18 @@ function pnlClass(v) {
     return 'text-gray-300';
 }
 
+function traderLabel(t) {
+    return t.trader_name || (t.trader_wallet ? t.trader_wallet.slice(0, 8) + '...' : '-');
+}
+
+function traderUrl(t) {
+    if (t.trader_slug) return `https://polymarket.com/@${t.trader_slug}`;
+    if (t.trader_wallet) return `https://polymarket.com/portfolio/${t.trader_wallet}`;
+    return null;
+}
+
 const columns = [
+    { key: 'trader_name', label: 'Trader' },
     { key: 'asset_id', label: 'Asset' },
     { key: 'buy_price', label: 'Buy' },
     { key: 'sell_price', label: 'Sell' },
@@ -80,9 +91,16 @@ const columns = [
             </thead>
             <tbody>
                 <tr v-if="trades.length === 0">
-                    <td colspan="7" class="text-gray-500 px-3 py-2">No closed trades yet</td>
+                    <td colspan="8" class="text-gray-500 px-3 py-2">No closed trades yet</td>
                 </tr>
                 <tr v-for="t in paged" :key="t.asset_id + t.closed_at" class="hover:bg-gray-900">
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
+                        <a v-if="traderUrl(t)" :href="traderUrl(t)" target="_blank"
+                           class="text-blue-400 hover:text-blue-300 hover:underline">
+                            {{ traderLabel(t) }}
+                        </a>
+                        <span v-else class="text-gray-500">-</span>
+                    </td>
                     <td class="px-3 py-2 border-b border-gray-800 font-mono text-xs text-gray-500">{{ shortId(t.asset_id) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.buy_price.toFixed(2) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.sell_price.toFixed(2) }}</td>
