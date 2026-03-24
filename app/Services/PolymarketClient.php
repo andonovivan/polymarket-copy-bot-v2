@@ -93,12 +93,13 @@ class PolymarketClient
     }
 
     /**
-     * Check the resolution status of a market by looking up a token's condition.
+     * Check the resolution status of a market by looking up a token via the Gamma API.
      *
-     * The CLOB API /markets endpoint returns market info including:
-     * - closed: bool (trading has ended)
-     * - accepting_orders: bool (false if resolved)
-     * - tokens[].winner: bool (which outcome won)
+     * The Gamma API (https://gamma-api.polymarket.com/markets) reliably maps
+     * a CLOB token ID to its market and provides:
+     * - closed: bool
+     * - clobTokenIds: JSON array of token IDs for each outcome
+     * - outcomePrices: JSON array of prices ("1" for winner, "0" for loser)
      *
      * Returns: ['resolved' => bool, 'winner_token' => string|null, 'payout' => float]
      * or null on failure.
@@ -112,12 +113,9 @@ class PolymarketClient
         }
 
         try {
-            // The CLOB API allows fetching a market by condition_id.
-            // But we only have a token_id. We can use the /markets endpoint
-            // with the token_id to find the associated market.
             $response = Http::timeout(10)
-                ->get("{$this->clobApiUrl}/markets", [
-                    'token_id' => $tokenId,
+                ->get('https://gamma-api.polymarket.com/markets', [
+                    'clob_token_ids' => $tokenId,
                 ]);
 
             if (! $response->successful()) {
@@ -126,27 +124,35 @@ class PolymarketClient
                 return null;
             }
 
-            $market = $response->json();
+            $markets = $response->json();
+            if (empty($markets) || ! is_array($markets)) {
+                Cache::put($cacheKey, 'UNKNOWN', 300);
 
-            // If the response is a list, take the first.
-            if (isset($market[0])) {
-                $market = $market[0];
+                return null;
             }
 
+            $market = $markets[0];
             $closed = (bool) ($market['closed'] ?? false);
-            $acceptingOrders = (bool) ($market['accepting_orders'] ?? true);
-            $resolved = $closed && ! $acceptingOrders;
+
+            // Parse the token IDs and outcome prices (both are JSON-encoded strings).
+            $tokenIds = json_decode($market['clobTokenIds'] ?? '[]', true) ?: [];
+            $outcomePrices = json_decode($market['outcomePrices'] ?? '[]', true) ?: [];
+
+            // A market is resolved if closed AND one outcome has price "1".
+            $hasDefinitivePrice = in_array('1', $outcomePrices, true) || in_array(1, $outcomePrices);
+            $resolved = $closed && $hasDefinitivePrice;
 
             $winnerToken = null;
             $payout = 0.0;
 
-            if ($resolved && isset($market['tokens']) && is_array($market['tokens'])) {
-                foreach ($market['tokens'] as $token) {
-                    $tid = $token['token_id'] ?? '';
-                    if ($tid === $tokenId && ! empty($token['winner'])) {
-                        $winnerToken = $tid;
-                        $payout = 1.0; // Winning outcome pays $1 per share.
-                        break;
+            if ($resolved) {
+                // Find our token's index and check its payout.
+                $ourIndex = array_search($tokenId, $tokenIds);
+                if ($ourIndex !== false && isset($outcomePrices[$ourIndex])) {
+                    $ourPrice = (float) $outcomePrices[$ourIndex];
+                    if ($ourPrice >= 0.99) {
+                        $winnerToken = $tokenId;
+                        $payout = 1.0;
                     }
                 }
             }
@@ -155,7 +161,7 @@ class PolymarketClient
                 'resolved' => $resolved,
                 'winner_token' => $winnerToken,
                 'payout' => $payout,
-                'condition_id' => $market['condition_id'] ?? null,
+                'condition_id' => $market['conditionId'] ?? null,
             ];
 
             // Cache resolved markets for 1 hour (they won't change), active for 5 min.
