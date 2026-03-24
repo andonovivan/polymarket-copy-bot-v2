@@ -93,6 +93,87 @@ class PolymarketClient
     }
 
     /**
+     * Check the resolution status of a market by looking up a token's condition.
+     *
+     * The CLOB API /markets endpoint returns market info including:
+     * - closed: bool (trading has ended)
+     * - accepting_orders: bool (false if resolved)
+     * - tokens[].winner: bool (which outcome won)
+     *
+     * Returns: ['resolved' => bool, 'winner_token' => string|null, 'payout' => float]
+     * or null on failure.
+     */
+    public function getMarketByToken(string $tokenId): ?array
+    {
+        $cacheKey = "market_resolution:{$tokenId}";
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached === 'UNKNOWN' ? null : $cached;
+        }
+
+        try {
+            // The CLOB API allows fetching a market by condition_id.
+            // But we only have a token_id. We can use the /markets endpoint
+            // with the token_id to find the associated market.
+            $response = Http::timeout(10)
+                ->get("{$this->clobApiUrl}/markets", [
+                    'token_id' => $tokenId,
+                ]);
+
+            if (! $response->successful()) {
+                Cache::put($cacheKey, 'UNKNOWN', 300);
+
+                return null;
+            }
+
+            $market = $response->json();
+
+            // If the response is a list, take the first.
+            if (isset($market[0])) {
+                $market = $market[0];
+            }
+
+            $closed = (bool) ($market['closed'] ?? false);
+            $acceptingOrders = (bool) ($market['accepting_orders'] ?? true);
+            $resolved = $closed && ! $acceptingOrders;
+
+            $winnerToken = null;
+            $payout = 0.0;
+
+            if ($resolved && isset($market['tokens']) && is_array($market['tokens'])) {
+                foreach ($market['tokens'] as $token) {
+                    $tid = $token['token_id'] ?? '';
+                    if ($tid === $tokenId && ! empty($token['winner'])) {
+                        $winnerToken = $tid;
+                        $payout = 1.0; // Winning outcome pays $1 per share.
+                        break;
+                    }
+                }
+            }
+
+            $result = [
+                'resolved' => $resolved,
+                'winner_token' => $winnerToken,
+                'payout' => $payout,
+                'condition_id' => $market['condition_id'] ?? null,
+            ];
+
+            // Cache resolved markets for 1 hour (they won't change), active for 5 min.
+            Cache::put($cacheKey, $result, $resolved ? 3600 : 300);
+
+            return $result;
+        } catch (\Throwable $e) {
+            Log::warning('market_resolution_check_failed', [
+                'token_id' => $tokenId,
+                'error' => substr($e->getMessage(), 0, 120),
+            ]);
+            Cache::put($cacheKey, 'UNKNOWN', 300);
+
+            return null;
+        }
+    }
+
+    /**
      * Place a limit order on the CLOB. Returns the API response array or null on failure.
      * In dry-run mode, logs the order and returns a stub.
      */

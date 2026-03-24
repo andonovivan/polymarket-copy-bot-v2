@@ -20,6 +20,71 @@ class TradeCopier
     }
 
     /**
+     * Check all open positions for resolved markets and close them accordingly.
+     *
+     * For each position:
+     * - If market resolved and our token WON → record P&L at $1/share (full payout).
+     * - If market resolved and our token LOST → record P&L at $0/share (total loss).
+     * - If market not resolved or check fails → skip.
+     *
+     * Resolved markets have no order book, so we don't place sell orders.
+     * Instead we directly update the position as if redeemed.
+     */
+    public function checkResolvedPositions(): int
+    {
+        $positions = Position::where('shares', '>', 0)->get();
+        if ($positions->isEmpty()) {
+            return 0;
+        }
+
+        $closedCount = 0;
+
+        foreach ($positions as $position) {
+            $assetId = $position->asset_id;
+            $market = $this->client->getMarketByToken($assetId);
+
+            if ($market === null || ! $market['resolved']) {
+                continue;
+            }
+
+            $shares = (float) $position->shares;
+            $buyPrice = (float) $position->buy_price;
+
+            // Determine payout: $1/share if we hold the winning token, $0 if losing.
+            $isWinner = $market['winner_token'] === $assetId;
+            $sellPrice = $isWinner ? 1.0 : 0.0;
+
+            $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
+            $outcome = $isWinner ? 'WON' : 'LOST';
+
+            Log::info('resolved_position_closed', [
+                'asset_id' => substr($assetId, 0, 16) . '...',
+                'outcome' => $outcome,
+                'shares' => $shares,
+                'buy_price' => $buyPrice,
+                'sell_price' => $sellPrice,
+                'pnl' => $pnl,
+            ]);
+
+            $this->recordPnl($assetId, $buyPrice, $sellPrice, $shares);
+
+            $position->shares = 0;
+            $position->exposure = 0;
+            $position->buy_price = 0;
+            $position->opened_at = null;
+            $position->save();
+
+            $closedCount++;
+        }
+
+        if ($closedCount > 0) {
+            Log::info('resolved_positions_check_done', ['closed' => $closedCount]);
+        }
+
+        return $closedCount;
+    }
+
+    /**
      * Attempt to replicate a detected trade. Returns true if an order was placed.
      *
      * Filters: sell filter → zero price → size calc → price tolerance → exposure cap → place order.

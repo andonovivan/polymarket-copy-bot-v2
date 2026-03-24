@@ -72,6 +72,12 @@ async function closePosition(assetId) {
     } catch(e) { alert('Failed to close position'); }
 }
 
+function statusBadge(status) {
+    if (status === 'resolved_won') return { text: 'WON', cls: 'bg-green-800 text-green-300' };
+    if (status === 'resolved_lost') return { text: 'LOST', cls: 'bg-red-800 text-red-300' };
+    return null;
+}
+
 const columns = [
     { key: 'asset_id', label: 'Asset' },
     { key: 'shares', label: 'Shares' },
@@ -81,6 +87,7 @@ const columns = [
     { key: 'current_value', label: 'Value' },
     { key: 'unrealized_pnl', label: 'P&L' },
     { key: 'opened_at', label: 'Opened' },
+    { key: 'status', label: 'Status' },
 ];
 </script>
 
@@ -99,7 +106,7 @@ const columns = [
             </thead>
             <tbody>
                 <tr v-if="positions.length === 0">
-                    <td colspan="9" class="text-gray-500 px-3 py-2">No open positions</td>
+                    <td colspan="10" class="text-gray-500 px-3 py-2">No open positions</td>
                 </tr>
                 <tr v-for="p in paged" :key="p.asset_id" class="hover:bg-gray-900">
                     <td class="px-3 py-2 border-b border-gray-800 font-mono text-xs text-gray-500">{{ shortId(p.asset_id) }}</td>
@@ -112,6 +119,13 @@ const columns = [
                         {{ p.unrealized_pnl !== null ? fmtUsd(p.unrealized_pnl) : '-' }}
                     </td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ fmtDate(p.opened_at) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
+                        <span v-if="statusBadge(p.status)" :class="statusBadge(p.status).cls"
+                              class="px-2 py-0.5 rounded text-xs font-semibold">
+                            {{ statusBadge(p.status).text }}
+                        </span>
+                        <span v-else class="text-gray-600 text-xs">Active</span>
+                    </td>
                     <td class="px-3 py-2 border-b border-gray-800">
                         <button @click="closePosition(p.asset_id)"
                                 class="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 rounded">

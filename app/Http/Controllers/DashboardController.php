@@ -34,6 +34,17 @@ class DashboardController extends Controller
             $currentPrice = $client->getMidpoint($pos->asset_id);
             $cost = $buyPrice * $shares;
 
+            // If no midpoint, check if market is resolved to show accurate value.
+            $status = 'active';
+            if ($currentPrice === null) {
+                $market = $client->getMarketByToken($pos->asset_id);
+                if ($market !== null && $market['resolved']) {
+                    $isWinner = $market['winner_token'] === $pos->asset_id;
+                    $currentPrice = $isWinner ? 1.0 : 0.0;
+                    $status = $isWinner ? 'resolved_won' : 'resolved_lost';
+                }
+            }
+
             $currentValue = $currentPrice !== null ? $currentPrice * $shares : null;
             $unrealized = $currentValue !== null ? $currentValue - $cost : null;
 
@@ -46,6 +57,7 @@ class DashboardController extends Controller
                 'current_value' => $currentValue !== null ? round($currentValue, 4) : null,
                 'unrealized_pnl' => $unrealized !== null ? round($unrealized, 4) : null,
                 'opened_at' => $pos->opened_at?->timestamp ?? 0,
+                'status' => $status,
             ];
 
             if ($unrealized !== null) {
