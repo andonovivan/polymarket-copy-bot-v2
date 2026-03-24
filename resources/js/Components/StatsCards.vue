@@ -43,7 +43,7 @@ function fmtUsd(v) {
         </div>
         <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
             <div class="text-gray-500 text-xs uppercase tracking-wide">Open Positions</div>
-            <div class="text-2xl font-bold mt-1 text-gray-300">{{ data.positions.length }}</div>
+            <div class="text-2xl font-bold mt-1 text-gray-300">{{ data.open_positions_count ?? 0 }}</div>
         </div>
         <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
             <div class="text-gray-500 text-xs uppercase tracking-wide">Total Invested</div>

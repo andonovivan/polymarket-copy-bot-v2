@@ -42,14 +42,16 @@ npm run build                    # Build frontend assets
 ### Services (`app/Services/`)
 
 - **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active).
-- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes.
+- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes.
 - **TradeTracker** - Polls Polymarket Data API for new trades. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
 
 ### Controllers (`app/Http/Controllers/`)
 
-- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns all dashboard data from DB (no external API calls, instant response).
+- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns summary stats, wallet report, and balance info from DB (no positions/trades arrays — those use separate paginated endpoints).
+- **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
+- **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
 - **WalletController** - CRUD for tracked wallets: `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `DELETE /api/wallets` (remove).
-- **PositionController** - `POST /api/close` manually closes a position at current midpoint.
+- **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 
 ### Models (`app/Models/`)
 
@@ -59,16 +61,18 @@ npm run build                    # Build frontend assets
 | `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug)   |
 | `TradeHistory` | Closed trade records (buy/sell price, shares, pnl, timestamps) |
 | `PnlSummary`   | Singleton row with aggregate P&L stats                         |
-| `BotMeta`      | Key-value store for bot metadata (last_running_ts)             |
+| `BotMeta`      | Key-value store for bot metadata (last_running_ts, polymarket_balance, trading_balance) |
 | `SeenTrade`    | Transaction hashes of already-processed trades                 |
 
 ### Vue Frontend (`resources/js/`)
 
-- **Dashboard.vue** - Main page with two tabs (Dashboard, Wallets). Auto-refreshes `/api/data` every 10 seconds.
+- **Dashboard.vue** - Main page with three tabs (Dashboard, Wallets, Report). Auto-refreshes `/api/data` every 10 seconds. Passes `refreshTrigger` counter to table components so they re-fetch their current page.
+- **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount, and usage progress bar.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
-- **PositionsTable.vue** - Paginated, sortable table of open positions with Close button and trader profile links.
-- **TradeHistoryTable.vue** - Paginated, sortable table of closed trades with P&L and trader profile links.
+- **PositionsTable.vue** - Server-side paginated, sortable table of open positions. Fetches from `GET /api/positions` with page/sort/order params. Includes Close button and trader profile links.
+- **TradeHistoryTable.vue** - Server-side paginated, sortable table of closed trades. Fetches from `GET /api/trades` with page/sort/order params.
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug.
+- **WalletReport.vue** - Per-wallet performance report with combined/realized/unrealized P&L, win rate, trade counts, and performance rating badges.
 
 ### Configuration (`config/polymarket.php`)
 
@@ -99,7 +103,7 @@ All trading parameters are configurable via `.env`:
 ### Normal Operation (bot running)
 
 1. **Every 30s** - `bot:poll`: Fetches trades from all tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
-2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails
+2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
 4. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
 
@@ -115,13 +119,16 @@ All trading parameters are configurable via `.env`:
 2. Filter: skip sells if disabled, skip zero price
 3. Calculate size: `$2 / trade_price` for buys, all held shares for sells
 4. Price sanity: skip if midpoint deviates > 3 cents from trade price
-5. Exposure cap: skip if would exceed $100 per market
-6. Place order via CLOB API (or log in dry-run mode)
-7. Update position with weighted-average buy price, save to DB
+5. Trading balance limit: skip if total invested + trade amount would exceed user-set limit
+6. Exposure cap: skip if would exceed $100 per market
+7. Place order via CLOB API (or log in dry-run mode)
+8. Update position with weighted-average buy price, save to DB
 
 ## Key Design Decisions
 
-- **Dashboard reads from DB only** - Prices are cached in the `positions` table by `bot:update-prices`. The `/api/data` endpoint makes zero external API calls, keeping response times ~20ms.
+- **Dashboard reads from DB only** - Prices are cached in the `positions` table by `bot:update-prices`. All API endpoints make zero external API calls, keeping response times ~20ms.
+- **Server-side pagination** - Positions and trades tables use separate paginated API endpoints (`/api/positions`, `/api/trades`) with server-side sorting (SQL ORDER BY) and pagination (LIMIT/OFFSET). Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
+- **Trading balance limit** - User-configurable limit stored in `BotMeta`. When total invested + trade amount exceeds limit, BUY trades are skipped. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys.
@@ -140,8 +147,10 @@ app/
   DTOs/
     DetectedTrade.php        # Immutable trade data object
   Http/Controllers/
-    DashboardController.php  # Dashboard page + /api/data
-    PositionController.php   # POST /api/close
+    BalanceController.php    # PUT /api/balance - trading balance limit
+    DashboardController.php  # Dashboard page + /api/data (summary stats only)
+    PositionController.php   # GET /api/positions (paginated) + POST /api/close
+    TradeHistoryController.php # GET /api/trades (paginated)
     WalletController.php     # CRUD /api/wallets
   Models/
     BotMeta.php              # Key-value metadata store
@@ -158,12 +167,14 @@ config/
   polymarket.php             # All trading configuration
 database/migrations/         # 8 migration files
 resources/js/
-  Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets)
+  Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report)
   Components/
+    BalanceBar.vue           # Balance management (Polymarket + trading limit)
     StatsCards.vue            # P&L stat cards
-    PositionsTable.vue       # Open positions table
-    TradeHistoryTable.vue    # Closed trades table
+    PositionsTable.vue       # Server-side paginated open positions
+    TradeHistoryTable.vue    # Server-side paginated closed trades
     WalletsManager.vue       # Wallet CRUD UI
+    WalletReport.vue         # Per-wallet performance report
 routes/
   api.php                    # API endpoints
   console.php                # Scheduled tasks

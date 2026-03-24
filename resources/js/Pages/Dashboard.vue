@@ -10,12 +10,14 @@ import WalletReport from '../Components/WalletReport.vue';
 const activeTab = ref('dashboard');
 const data = ref(null);
 const loading = ref(true);
+const refreshTrigger = ref(0);
 let interval = null;
 
 async function refresh() {
     try {
         const r = await fetch('/api/data');
         data.value = await r.json();
+        refreshTrigger.value++;
     } catch (e) {
         console.error('Dashboard refresh failed', e);
     } finally {
@@ -75,10 +77,10 @@ function fmtTime(ts) {
                 <StatsCards v-if="data" :data="data" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Open Positions</h2>
-                <PositionsTable v-if="data" :positions="data.positions" @refresh="refresh" />
+                <PositionsTable :refreshTrigger="refreshTrigger" @refresh="refresh" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Recent Closed Trades</h2>
-                <TradeHistoryTable v-if="data" :trades="data.recent_trades" />
+                <TradeHistoryTable :refreshTrigger="refreshTrigger" />
             </div>
 
             <!-- Wallets Tab -->
