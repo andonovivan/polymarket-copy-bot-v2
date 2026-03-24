@@ -1,0 +1,72 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\Position;
+use App\Services\PolymarketClient;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Http;
+
+class UpdatePrices extends Command
+{
+    protected $signature = 'bot:update-prices';
+
+    protected $description = 'Fetch current midpoint prices for all open positions and cache them in the DB';
+
+    public function handle(PolymarketClient $client): int
+    {
+        $positions = Position::where('shares', '>', 0)->get();
+        if ($positions->isEmpty()) {
+            return self::SUCCESS;
+        }
+
+        // Fetch midpoints concurrently using Laravel HTTP pool.
+        $tokenIds = $positions->pluck('asset_id')->all();
+
+        $responses = Http::pool(function ($pool) use ($tokenIds, $client) {
+            $clobApiUrl = config('polymarket.clob_api_url');
+            foreach ($tokenIds as $tokenId) {
+                $pool->as($tokenId)
+                    ->timeout(8)
+                    ->get("{$clobApiUrl}/midpoint", ['token_id' => $tokenId]);
+            }
+        });
+
+        $now = now();
+        $updated = 0;
+
+        foreach ($positions as $position) {
+            $assetId = $position->asset_id;
+            $response = $responses[$assetId] ?? null;
+
+            $midpoint = null;
+            if ($response && $response->successful()) {
+                $mid = (float) ($response->json('mid') ?? 0);
+                if ($mid > 0) {
+                    $midpoint = $mid;
+                }
+            }
+
+            if ($midpoint !== null) {
+                $position->current_price = $midpoint;
+                $position->market_status = 'active';
+                $position->price_updated_at = $now;
+                $position->save();
+                $updated++;
+            } elseif ($position->market_status === 'active') {
+                // Midpoint failed — check if market resolved.
+                $market = $client->getMarketByToken($assetId);
+                if ($market !== null && $market['resolved']) {
+                    $isWinner = $market['winner_token'] === $assetId;
+                    $position->current_price = $isWinner ? 1.0 : 0.0;
+                    $position->market_status = $isWinner ? 'resolved_won' : 'resolved_lost';
+                    $position->price_updated_at = $now;
+                    $position->save();
+                    $updated++;
+                }
+            }
+        }
+
+        return self::SUCCESS;
+    }
+}

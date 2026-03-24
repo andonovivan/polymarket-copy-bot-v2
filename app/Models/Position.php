@@ -11,6 +11,9 @@ class Position extends Model
         'shares',
         'exposure',
         'buy_price',
+        'current_price',
+        'market_status',
+        'price_updated_at',
         'opened_at',
     ];
 
@@ -20,7 +23,9 @@ class Position extends Model
             'shares' => 'float',
             'exposure' => 'float',
             'buy_price' => 'float',
+            'current_price' => 'float',
             'opened_at' => 'datetime',
+            'price_updated_at' => 'datetime',
         ];
     }
 }

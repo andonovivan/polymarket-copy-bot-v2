@@ -6,7 +6,6 @@ use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Models\TradeHistory;
 use App\Models\TrackedWallet;
-use App\Services\PolymarketClient;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
@@ -21,8 +20,11 @@ class DashboardController extends Controller
 
     /**
      * Return full dashboard JSON data.
+     *
+     * Reads all prices from the DB (populated by bot:update-prices).
+     * Zero external API calls — response is instant.
      */
-    public function data(PolymarketClient $client)
+    public function data()
     {
         $positions = [];
         $totalUnrealized = 0.0;
@@ -31,19 +33,9 @@ class DashboardController extends Controller
         foreach (Position::where('shares', '>', 0)->get() as $pos) {
             $buyPrice = (float) $pos->buy_price;
             $shares = (float) $pos->shares;
-            $currentPrice = $client->getMidpoint($pos->asset_id);
+            $currentPrice = $pos->current_price;
+            $status = $pos->market_status ?? 'active';
             $cost = $buyPrice * $shares;
-
-            // If no midpoint, check if market is resolved to show accurate value.
-            $status = 'active';
-            if ($currentPrice === null) {
-                $market = $client->getMarketByToken($pos->asset_id);
-                if ($market !== null && $market['resolved']) {
-                    $isWinner = $market['winner_token'] === $pos->asset_id;
-                    $currentPrice = $isWinner ? 1.0 : 0.0;
-                    $status = $isWinner ? 'resolved_won' : 'resolved_lost';
-                }
-            }
 
             $currentValue = $currentPrice !== null ? $currentPrice * $shares : null;
             $unrealized = $currentValue !== null ? $currentValue - $cost : null;
