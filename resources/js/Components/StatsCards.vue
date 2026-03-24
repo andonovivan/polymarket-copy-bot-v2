@@ -9,7 +9,7 @@ function pnlClass(v) {
 
 function fmtUsd(v) {
     if (v === null || v === undefined) return '-';
-    const abs = Math.abs(v).toFixed(4);
+    const abs = Math.abs(v).toFixed(2);
     return v >= 0 ? `+$${abs}` : `-$${abs}`;
 }
 </script>

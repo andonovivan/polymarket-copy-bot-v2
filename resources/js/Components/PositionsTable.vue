@@ -39,7 +39,7 @@ function shortId(id) { return id ? id.slice(0, 8) + '...' + id.slice(-6) : '-'; 
 
 function fmtUsd(v) {
     if (v === null || v === undefined) return '-';
-    const abs = Math.abs(v).toFixed(4);
+    const abs = Math.abs(v).toFixed(2);
     return v >= 0 ? `+$${abs}` : `-$${abs}`;
 }
 
@@ -67,7 +67,7 @@ async function closePosition(assetId) {
         });
         const d = await r.json();
         if (d.error) { alert('Failed: ' + d.error); return; }
-        alert(`Position closed at $${d.price} | P&L: ${d.pnl >= 0 ? '+' : ''}$${d.pnl.toFixed(4)}`);
+        alert(`Position closed at $${d.price} | P&L: ${d.pnl >= 0 ? '+' : ''}$${d.pnl.toFixed(2)}`);
         emit('refresh');
     } catch(e) { alert('Failed to close position'); }
 }
@@ -111,11 +111,11 @@ const columns = [
                 </tr>
                 <tr v-for="p in paged" :key="p.asset_id" class="hover:bg-gray-900">
                     <td class="px-3 py-2 border-b border-gray-800 font-mono text-xs text-gray-500">{{ shortId(p.asset_id) }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.shares }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ p.buy_price }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.current_price !== null ? '$' + p.current_price : '-' }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ p.cost }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.current_value !== null ? '$' + p.current_value : '-' }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.shares.toFixed(2) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ p.buy_price.toFixed(2) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.current_price !== null ? '$' + p.current_price.toFixed(2) : '-' }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ p.cost.toFixed(2) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ p.current_value !== null ? '$' + p.current_value.toFixed(2) : '-' }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm" :class="pnlClass(p.unrealized_pnl)">
                         {{ p.unrealized_pnl !== null ? fmtUsd(p.unrealized_pnl) : '-' }}
                     </td>
@@ -128,7 +128,8 @@ const columns = [
                         <span v-else class="text-gray-600 text-xs">Active</span>
                     </td>
                     <td class="px-3 py-2 border-b border-gray-800">
-                        <button @click="closePosition(p.asset_id)"
+                        <button v-if="!p.status || p.status === 'active'"
+                                @click="closePosition(p.asset_id)"
                                 class="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 rounded">
                             Close
                         </button>

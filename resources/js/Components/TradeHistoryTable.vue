@@ -38,7 +38,7 @@ function shortId(id) { return id ? id.slice(0, 8) + '...' + id.slice(-6) : '-'; 
 
 function fmtUsd(v) {
     if (v === null || v === undefined) return '-';
-    const abs = Math.abs(v).toFixed(4);
+    const abs = Math.abs(v).toFixed(2);
     return v >= 0 ? `+$${abs}` : `-$${abs}`;
 }
 
@@ -84,9 +84,9 @@ const columns = [
                 </tr>
                 <tr v-for="t in paged" :key="t.asset_id + t.closed_at" class="hover:bg-gray-900">
                     <td class="px-3 py-2 border-b border-gray-800 font-mono text-xs text-gray-500">{{ shortId(t.asset_id) }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.buy_price }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.sell_price }}</td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ t.shares }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.buy_price.toFixed(2) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">${{ t.sell_price.toFixed(2) }}</td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ t.shares.toFixed(2) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm" :class="pnlClass(t.pnl)">{{ fmtUsd(t.pnl) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ fmtDate(t.opened_at) }}</td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">{{ fmtDate(t.closed_at) }}</td>
