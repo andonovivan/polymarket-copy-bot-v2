@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\BotMeta;
 use App\Models\Position;
 use App\Services\PolymarketClient;
 use Illuminate\Console\Command;
@@ -66,6 +67,14 @@ class UpdatePrices extends Command
                     $position->save();
                     $updated++;
                 }
+            }
+        }
+
+        // Cache Polymarket account balance.
+        if (! config('polymarket.dry_run')) {
+            $balance = $client->getBalanceUsdc();
+            if ($balance !== null) {
+                BotMeta::setValue('polymarket_balance', (string) round($balance, 4));
             }
         }
 

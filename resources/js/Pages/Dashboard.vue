@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import BalanceBar from '../Components/BalanceBar.vue';
 import StatsCards from '../Components/StatsCards.vue';
 import PositionsTable from '../Components/PositionsTable.vue';
 import TradeHistoryTable from '../Components/TradeHistoryTable.vue';
@@ -70,6 +71,7 @@ function fmtTime(ts) {
 
             <!-- Dashboard Tab -->
             <div v-show="activeTab === 'dashboard'">
+                <BalanceBar v-if="data" :data="data" @refresh="refresh" />
                 <StatsCards v-if="data" :data="data" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Open Positions</h2>

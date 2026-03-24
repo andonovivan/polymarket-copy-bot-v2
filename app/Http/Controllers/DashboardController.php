@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BotMeta;
 use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Models\TradeHistory;
@@ -170,6 +171,8 @@ class DashboardController extends Controller
             'combined_pnl' => round((float) $pnl->total_realized + $totalUnrealized, 4),
             'recent_trades' => $recentTrades,
             'wallet_report' => $walletReport,
+            'polymarket_balance' => BotMeta::getValue('polymarket_balance'),
+            'trading_balance' => BotMeta::getValue('trading_balance'),
             'dry_run' => config('polymarket.dry_run'),
             'tracked_wallets' => TrackedWallet::count(),
             'tracked_wallets_list' => TrackedWallet::orderBy('id')->get()->map(fn ($w) => [

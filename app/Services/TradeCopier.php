@@ -8,6 +8,7 @@ use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Models\TradeHistory;
 use App\Models\TrackedWallet;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class TradeCopier
@@ -143,8 +144,28 @@ class TradeCopier
             }
         }
 
-        // --- Exposure cap (BUY only) ---
+        // --- Trading balance limit (BUY only) ---
         $fixedAmountUsdc = config('polymarket.fixed_amount_usdc');
+
+        if ($trade->side === 'BUY') {
+            $tradingBalance = BotMeta::getValue('trading_balance');
+            if ($tradingBalance !== null && $tradingBalance !== '') {
+                $tradingBalance = (float) $tradingBalance;
+                $totalInvested = (float) Position::where('shares', '>', 0)->sum(DB::raw('buy_price * shares'));
+                if ($tradingBalance > 0 && $totalInvested + $fixedAmountUsdc > $tradingBalance) {
+                    Log::warning('trading_balance_exceeded', [
+                        'trade_id' => $trade->tradeId,
+                        'total_invested' => round($totalInvested, 2),
+                        'would_add' => $fixedAmountUsdc,
+                        'trading_balance' => $tradingBalance,
+                    ]);
+
+                    return false;
+                }
+            }
+        }
+
+        // --- Exposure cap (BUY only) ---
         $position = Position::where('asset_id', $trade->assetId)->first();
         $currentExposure = $position ? (float) $position->exposure : 0.0;
 
