@@ -138,21 +138,22 @@ class PolymarketClient
             $tokenIds = json_decode($market['clobTokenIds'] ?? '[]', true) ?: [];
             $outcomePrices = json_decode($market['outcomePrices'] ?? '[]', true) ?: [];
 
-            // A market is resolved if closed AND one outcome has price "1".
-            $hasDefinitivePrice = in_array('1', $outcomePrices, true) || in_array(1, $outcomePrices);
-            $resolved = $closed && $hasDefinitivePrice;
+            // A market is resolved if closed AND outcome prices are set (not all zero/null).
+            $hasOutcomePrices = ! empty($outcomePrices) && array_sum(array_map('floatval', $outcomePrices)) > 0;
+            $resolved = $closed && $hasOutcomePrices;
 
             $winnerToken = null;
             $payout = 0.0;
 
             if ($resolved) {
-                // Find our token's index and check its payout.
+                // Find our token's index and its payout.
                 $ourIndex = array_search($tokenId, $tokenIds);
                 if ($ourIndex !== false && isset($outcomePrices[$ourIndex])) {
-                    $ourPrice = (float) $outcomePrices[$ourIndex];
-                    if ($ourPrice >= 0.99) {
+                    $payout = (float) $outcomePrices[$ourIndex];
+                    // Winner if payout >= 0.99 (full win).
+                    // Partial payout (e.g. 0.5) means voided/cancelled market.
+                    if ($payout >= 0.99) {
                         $winnerToken = $tokenId;
-                        $payout = 1.0;
                     }
                 }
             }

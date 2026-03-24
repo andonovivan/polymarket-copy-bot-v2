@@ -50,12 +50,15 @@ class TradeCopier
             $shares = (float) $position->shares;
             $buyPrice = (float) $position->buy_price;
 
-            // Determine payout: $1/share if we hold the winning token, $0 if losing.
+            // Payout comes from the market data:
+            // - $1.00 if our token won
+            // - $0.50 if market was voided/cancelled (50/50 split)
+            // - $0.00 if our token lost
+            $sellPrice = $market['payout'];
             $isWinner = $market['winner_token'] === $assetId;
-            $sellPrice = $isWinner ? 1.0 : 0.0;
 
             $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
-            $outcome = $isWinner ? 'WON' : 'LOST';
+            $outcome = $isWinner ? 'WON' : ($sellPrice > 0 ? 'VOIDED' : 'LOST');
 
             Log::info('resolved_position_closed', [
                 'asset_id' => substr($assetId, 0, 16) . '...',

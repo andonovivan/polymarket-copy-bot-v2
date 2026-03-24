@@ -75,6 +75,7 @@ async function closePosition(assetId) {
 function statusBadge(status) {
     if (status === 'resolved_won') return { text: 'WON', cls: 'bg-green-800 text-green-300' };
     if (status === 'resolved_lost') return { text: 'LOST', cls: 'bg-red-800 text-red-300' };
+    if (status === 'resolved_voided') return { text: 'VOIDED', cls: 'bg-yellow-800 text-yellow-300' };
     return null;
 }
 

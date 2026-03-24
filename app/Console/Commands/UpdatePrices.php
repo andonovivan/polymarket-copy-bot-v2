@@ -57,9 +57,11 @@ class UpdatePrices extends Command
                 // Midpoint failed — check if market resolved.
                 $market = $client->getMarketByToken($assetId);
                 if ($market !== null && $market['resolved']) {
+                    $payout = $market['payout'];
                     $isWinner = $market['winner_token'] === $assetId;
-                    $position->current_price = $isWinner ? 1.0 : 0.0;
-                    $position->market_status = $isWinner ? 'resolved_won' : 'resolved_lost';
+                    $position->current_price = $payout;
+                    $status = $isWinner ? 'resolved_won' : ($payout > 0 ? 'resolved_voided' : 'resolved_lost');
+                    $position->market_status = $status;
                     $position->price_updated_at = $now;
                     $position->save();
                     $updated++;
