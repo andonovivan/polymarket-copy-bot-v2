@@ -97,6 +97,65 @@ class DashboardController extends Controller
             ->values()
             ->all();
 
+        // --- Wallet performance report ---
+        $walletReport = [];
+
+        // Initialize report entries for all tracked wallets
+        foreach ($walletLookup as $addr => $info) {
+            $walletReport[$addr] = [
+                'address' => $addr,
+                'name' => $info['name'],
+                'profile_slug' => $info['profile_slug'],
+                'realized_pnl' => 0.0,
+                'unrealized_pnl' => 0.0,
+                'total_trades' => 0,
+                'winning_trades' => 0,
+                'losing_trades' => 0,
+                'open_positions' => 0,
+                'total_invested' => 0.0,
+            ];
+        }
+
+        // Aggregate realized stats from all trade history
+        foreach (TradeHistory::all() as $t) {
+            $w = $t->copied_from_wallet;
+            if (! isset($walletReport[$w])) {
+                continue;
+            }
+            $walletReport[$w]['realized_pnl'] += (float) $t->pnl;
+            $walletReport[$w]['total_trades']++;
+            if ((float) $t->pnl >= 0) {
+                $walletReport[$w]['winning_trades']++;
+            } else {
+                $walletReport[$w]['losing_trades']++;
+            }
+        }
+
+        // Aggregate unrealized stats from open positions
+        foreach ($positions as $p) {
+            $w = $p['trader_wallet'];
+            if (! $w || ! isset($walletReport[$w])) {
+                continue;
+            }
+            $walletReport[$w]['open_positions']++;
+            $walletReport[$w]['total_invested'] += $p['cost'];
+            if ($p['unrealized_pnl'] !== null) {
+                $walletReport[$w]['unrealized_pnl'] += $p['unrealized_pnl'];
+            }
+        }
+
+        // Round and compute derived fields
+        $walletReport = array_values(array_map(function ($r) {
+            $r['realized_pnl'] = round($r['realized_pnl'], 4);
+            $r['unrealized_pnl'] = round($r['unrealized_pnl'], 4);
+            $r['combined_pnl'] = round($r['realized_pnl'] + $r['unrealized_pnl'], 4);
+            $r['total_invested'] = round($r['total_invested'], 4);
+            $r['win_rate'] = $r['total_trades'] > 0
+                ? round($r['winning_trades'] / $r['total_trades'] * 100, 1)
+                : 0;
+            return $r;
+        }, $walletReport));
+
         return response()->json([
             'positions' => $positions,
             'total_unrealized' => round($totalUnrealized, 4),
@@ -110,6 +169,7 @@ class DashboardController extends Controller
             ],
             'combined_pnl' => round((float) $pnl->total_realized + $totalUnrealized, 4),
             'recent_trades' => $recentTrades,
+            'wallet_report' => $walletReport,
             'dry_run' => config('polymarket.dry_run'),
             'tracked_wallets' => TrackedWallet::count(),
             'tracked_wallets_list' => TrackedWallet::orderBy('id')->get()->map(fn ($w) => [

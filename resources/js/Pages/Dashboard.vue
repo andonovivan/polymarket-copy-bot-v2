@@ -4,6 +4,7 @@ import StatsCards from '../Components/StatsCards.vue';
 import PositionsTable from '../Components/PositionsTable.vue';
 import TradeHistoryTable from '../Components/TradeHistoryTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
+import WalletReport from '../Components/WalletReport.vue';
 
 const activeTab = ref('dashboard');
 const data = ref(null);
@@ -61,6 +62,10 @@ function fmtTime(ts) {
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'wallets' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
                     Wallets
                 </button>
+                <button @click="activeTab = 'report'"
+                        :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'report' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
+                    Report
+                </button>
             </div>
 
             <!-- Dashboard Tab -->
@@ -77,6 +82,12 @@ function fmtTime(ts) {
             <!-- Wallets Tab -->
             <div v-show="activeTab === 'wallets'">
                 <WalletsManager v-if="data" :wallets="data.tracked_wallets_list" @refresh="refresh" />
+            </div>
+
+            <!-- Report Tab -->
+            <div v-show="activeTab === 'report'">
+                <h2 class="text-blue-400 text-base mb-3">Wallet Performance Report</h2>
+                <WalletReport v-if="data" :wallets="data.wallet_report || []" />
             </div>
 
             <p class="text-gray-600 text-xs mt-6">Auto-refreshes every 10s</p>
