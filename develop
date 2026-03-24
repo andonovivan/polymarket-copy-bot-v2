@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+COMPOSE="docker compose"
+
+# If no arguments, show usage
+if [ $# -eq 0 ]; then
+    echo "Usage:"
+    echo "  ./develop up [-d]              Start all services (app + db + scheduler)"
+    echo "  ./develop down                 Stop all services"
+    echo "  ./develop build                Build Docker images"
+    echo "  ./develop logs [service]       View logs"
+    echo "  ./develop art <command>        Run artisan command"
+    echo "  ./develop composer <command>   Run composer command"
+    echo "  ./develop npm <command>        Run npm command"
+    echo "  ./develop bash                 Shell into app container"
+    echo "  ./develop migrate              Run migrations"
+    echo "  ./develop poll                 Run one poll cycle manually"
+    echo "  ./develop reconcile            Run reconciliation manually"
+    echo "  ./develop migrate-python [path] Import data from Python bot"
+    exit 0
+fi
+
+# Passthrough to docker compose for standard commands
+if [ "$1" == "up" ] || [ "$1" == "down" ] || [ "$1" == "build" ] || [ "$1" == "logs" ] || [ "$1" == "ps" ] || [ "$1" == "restart" ]; then
+    $COMPOSE "$@"
+
+elif [ "$1" == "art" ] || [ "$1" == "artisan" ]; then
+    shift 1
+    $COMPOSE exec app php artisan "$@"
+
+elif [ "$1" == "composer" ]; then
+    shift 1
+    $COMPOSE exec app composer "$@"
+
+elif [ "$1" == "npm" ]; then
+    shift 1
+    $COMPOSE exec app npm "$@"
+
+elif [ "$1" == "bash" ]; then
+    $COMPOSE exec app bash
+
+elif [ "$1" == "migrate" ]; then
+    $COMPOSE exec app php artisan migrate --force
+
+elif [ "$1" == "poll" ]; then
+    $COMPOSE exec app php artisan bot:poll
+
+elif [ "$1" == "reconcile" ]; then
+    $COMPOSE exec app php artisan bot:reconcile
+
+elif [ "$1" == "migrate-python" ]; then
+    shift 1
+    $COMPOSE exec app php artisan bot:migrate-from-python "$@"
+
+else
+    $COMPOSE "$@"
+fi
