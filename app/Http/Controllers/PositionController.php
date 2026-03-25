@@ -41,9 +41,15 @@ class PositionController extends Controller
             'profile_slug' => $w->profile_slug,
         ])->all();
 
-        $paginator = Position::where('shares', '>', 0)
-            ->orderBy($orderBy, $order)
-            ->paginate($perPage);
+        $query = Position::where('shares', '>', 0);
+
+        // Optional wallet filter.
+        $wallets = $request->input('wallets', []);
+        if (!empty($wallets)) {
+            $query->whereIn('copied_from_wallet', $wallets);
+        }
+
+        $paginator = $query->orderBy($orderBy, $order)->paginate($perPage);
 
         $data = collect($paginator->items())->map(function ($pos) use ($walletLookup) {
             $buyPrice = (float) $pos->buy_price;

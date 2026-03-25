@@ -12,6 +12,7 @@ const props = defineProps({
     emptyMessage: { type: String, default: 'No data' },
     loadingMessage: { type: String, default: 'Loading...' },
     label: { type: String, default: 'rows' },
+    extraParams: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(['refresh']);
@@ -35,6 +36,14 @@ async function fetchData() {
             sort: sortKey.value,
             order: sortOrder.value,
         });
+        // Append extra filter params (supports arrays like wallets[]).
+        for (const [key, val] of Object.entries(props.extraParams)) {
+            if (Array.isArray(val)) {
+                val.forEach(v => params.append(key, v));
+            } else if (val !== null && val !== undefined && val !== '') {
+                params.set(key, val);
+            }
+        }
         const r = await fetch(`${props.apiUrl}?${params}`);
         const d = await r.json();
         rows.value = d.data;
@@ -53,6 +62,7 @@ async function fetchData() {
 
 onMounted(fetchData);
 watch(() => props.refreshTrigger, fetchData);
+watch(() => JSON.stringify(props.extraParams), () => { page.value = 1; fetchData(); });
 
 function isSortable(col) {
     return col.sortable !== false;

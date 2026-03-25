@@ -6,6 +6,7 @@ import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl } from '../u
 const emit = defineEmits(['refresh']);
 const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
+    filters: { type: Object, default: () => ({}) },
 });
 
 const tableRef = ref(null);
@@ -52,7 +53,7 @@ async function closePosition(assetId) {
     <DataTable ref="tableRef" apiUrl="/api/positions" :columns="columns"
                defaultSort="opened_at" defaultOrder="desc" rowKey="asset_id"
                emptyMessage="No open positions" loadingMessage="Loading positions..."
-               :refreshTrigger="refreshTrigger" @refresh="emit('refresh')">
+               :refreshTrigger="refreshTrigger" :extraParams="filters" @refresh="emit('refresh')">
 
         <template #cell-trader_name="{ row }">
             <a v-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"

@@ -2,8 +2,9 @@
 import DataTable from './DataTable.vue';
 import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl } from '../utils/formatters.js';
 
-defineProps({
+const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
+    filters: { type: Object, default: () => ({}) },
 });
 
 const columns = [
@@ -22,7 +23,7 @@ const columns = [
     <DataTable apiUrl="/api/trades" :columns="columns"
                defaultSort="closed_at" defaultOrder="desc" rowKey="asset_id"
                emptyMessage="No closed trades yet" loadingMessage="Loading trades..."
-               :refreshTrigger="refreshTrigger">
+               :refreshTrigger="refreshTrigger" :extraParams="filters">
 
         <template #cell-trader_name="{ row }">
             <a v-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"

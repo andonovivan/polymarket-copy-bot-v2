@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import BalanceBar from '../Components/BalanceBar.vue';
 import StatsCards from '../Components/StatsCards.vue';
+import StatsFilter from '../Components/StatsFilter.vue';
 import PositionsTable from '../Components/PositionsTable.vue';
 import TradeHistoryTable from '../Components/TradeHistoryTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
@@ -9,10 +10,27 @@ import WalletReport from '../Components/WalletReport.vue';
 import WalletDiscovery from '../Components/WalletDiscovery.vue';
 
 const activeTab = ref('dashboard');
-const data = ref(null);
+const data = ref(null);         // Unfiltered — used by BalanceBar, header, global buttons.
+const statsData = ref(null);    // Filtered — used by StatsCards and tables.
 const loading = ref(true);
 const pauseLoading = ref(false);
 const closeAllLoading = ref(false);
+
+// Stats filters.
+const statsFilters = ref({ wallets: [], period: 'ALL' });
+const hasFilters = computed(() => statsFilters.value.wallets.length > 0 || statsFilters.value.period !== 'ALL');
+
+// Extra params object for DataTable components (derived from filters).
+const tableFilterParams = computed(() => {
+    const p = {};
+    if (statsFilters.value.wallets.length > 0) {
+        p['wallets[]'] = statsFilters.value.wallets;
+    }
+    if (statsFilters.value.period !== 'ALL') {
+        p.period = statsFilters.value.period;
+    }
+    return p;
+});
 
 // Per-tab refresh triggers — only the active tab gets incremented.
 const dashboardRefresh = ref(0);
@@ -21,7 +39,7 @@ const reportRefresh = ref(0);
 
 let interval = null;
 
-async function fetchStats() {
+async function fetchUnfilteredStats() {
     try {
         const r = await fetch('/api/data');
         data.value = await r.json();
@@ -30,6 +48,40 @@ async function fetchStats() {
     } finally {
         loading.value = false;
     }
+}
+
+async function fetchFilteredStats() {
+    if (!hasFilters.value) {
+        statsData.value = null;
+        return;
+    }
+    try {
+        const params = new URLSearchParams();
+        if (statsFilters.value.period !== 'ALL') {
+            params.set('period', statsFilters.value.period);
+        }
+        statsFilters.value.wallets.forEach(w => params.append('wallets[]', w));
+        const r = await fetch('/api/data?' + params.toString());
+        statsData.value = await r.json();
+    } catch (e) {
+        console.error('Filtered stats refresh failed', e);
+    }
+}
+
+function fetchStats() {
+    const promises = [fetchUnfilteredStats()];
+    if (hasFilters.value) promises.push(fetchFilteredStats());
+    return Promise.all(promises);
+}
+
+// The data StatsCards should display: filtered if active, unfiltered otherwise.
+const displayData = computed(() => hasFilters.value && statsData.value ? statsData.value : data.value);
+
+function onFilterChange(filters) {
+    statsFilters.value = filters;
+    // Clear stale filtered data immediately so displayData falls back to unfiltered while loading.
+    if (!hasFilters.value) statsData.value = null;
+    fetchFilteredStats();
 }
 
 function refresh() {
@@ -159,13 +211,14 @@ function fmtTime(ts) {
             <!-- Dashboard Tab -->
             <div v-if="activeTab === 'dashboard'">
                 <BalanceBar v-if="data" :data="data" @refresh="refresh" />
-                <StatsCards v-if="data" :data="data" />
+                <StatsFilter :refreshTrigger="dashboardRefresh" @change="onFilterChange" />
+                <StatsCards v-if="displayData" :data="displayData" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Open Positions</h2>
-                <PositionsTable :refreshTrigger="dashboardRefresh" @refresh="refresh" />
+                <PositionsTable :refreshTrigger="dashboardRefresh" :filters="tableFilterParams" @refresh="refresh" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Recent Closed Trades</h2>
-                <TradeHistoryTable :refreshTrigger="dashboardRefresh" />
+                <TradeHistoryTable :refreshTrigger="dashboardRefresh" :filters="tableFilterParams" />
             </div>
 
             <!-- Wallets Tab -->

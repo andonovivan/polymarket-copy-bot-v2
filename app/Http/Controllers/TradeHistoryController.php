@@ -37,7 +37,27 @@ class TradeHistoryController extends Controller
             'profile_slug' => $w->profile_slug,
         ])->all();
 
-        $paginator = TradeHistory::orderBy($orderBy, $order)->paginate($perPage);
+        $query = TradeHistory::query();
+
+        // Optional wallet filter.
+        $wallets = $request->input('wallets', []);
+        if (!empty($wallets)) {
+            $query->whereIn('copied_from_wallet', $wallets);
+        }
+
+        // Optional time period filter.
+        $period = $request->input('period', 'ALL');
+        $cutoff = match ($period) {
+            '1D' => now()->subDay(),
+            '1W' => now()->subWeek(),
+            '1M' => now()->subMonth(),
+            default => null,
+        };
+        if ($cutoff) {
+            $query->where('closed_at', '>=', $cutoff);
+        }
+
+        $paginator = $query->orderBy($orderBy, $order)->paginate($perPage);
 
         $data = collect($paginator->items())->map(function ($t) use ($walletLookup) {
             $wallet = $t->copied_from_wallet;
