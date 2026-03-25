@@ -15,8 +15,16 @@ return [
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),
 
-    // Auto-pause thresholds — wallets are paused when ALL conditions are met.
-    'auto_pause_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_MIN_TRADES', 10),
-    'auto_pause_max_win_rate' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_WIN_RATE', 30),
-    'auto_pause_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_LOSS', -15),
+    // Auto-pause thresholds — wallet is paused if ANY rule triggers.
+    // Rule 1: Deep unrealized loss (absolute).
+    'auto_pause_max_unrealized_loss' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_UNREALIZED_LOSS', -50),
+    // Rule 2: High exposure + losing (unrealized loss > ratio of invested, when invested > min).
+    'auto_pause_min_exposure' => (float) env('POLYMARKET_AUTO_PAUSE_MIN_EXPOSURE', 100),
+    'auto_pause_max_exposure_loss_ratio' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_EXPOSURE_LOSS_RATIO', 0.20),
+    // Rule 3: Bad closed track record (min trades + low win rate + negative combined P&L).
+    'auto_pause_bad_record_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MIN_TRADES', 5),
+    'auto_pause_bad_record_max_win_rate' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_WIN_RATE', 40),
+    'auto_pause_bad_record_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS', -10),
+    // Rule 4: Small sample but zero wins.
+    'auto_pause_zero_win_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES', 3),
 ];

@@ -90,9 +90,13 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
 | `POLYMARKET_DRY_RUN`          | true                            | Log only, no real orders             |
-| `POLYMARKET_AUTO_PAUSE_MIN_TRADES` | 10                        | Min trades before auto-pause evaluates |
-| `POLYMARKET_AUTO_PAUSE_MAX_WIN_RATE` | 30                      | Win rate % below which wallet may be paused |
-| `POLYMARKET_AUTO_PAUSE_MAX_LOSS` | -15                          | Combined P&L below which wallet may be paused |
+| `POLYMARKET_AUTO_PAUSE_MAX_UNREALIZED_LOSS` | -50              | Unrealized P&L below which wallet is paused (Rule 1) |
+| `POLYMARKET_AUTO_PAUSE_MIN_EXPOSURE` | 100                     | Min invested $ before exposure-loss rule applies (Rule 2) |
+| `POLYMARKET_AUTO_PAUSE_MAX_EXPOSURE_LOSS_RATIO` | 0.20         | Unrealized loss / invested ratio that triggers pause (Rule 2) |
+| `POLYMARKET_AUTO_PAUSE_BAD_RECORD_MIN_TRADES` | 5              | Min closed trades before track-record rule applies (Rule 3) |
+| `POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_WIN_RATE` | 40           | Win rate % below which wallet may be paused (Rule 3) |
+| `POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS` | -10              | Combined P&L below which wallet may be paused (Rule 3) |
+| `POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES` | 3                | Min closed trades with 0 wins to trigger pause (Rule 4) |
 
 ### External APIs
 
@@ -109,7 +113,7 @@ All trading parameters are configurable via `.env`:
 1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
 2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
-4. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses those with 10+ trades, <30% win rate, and <-$15 combined P&L
+4. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses if ANY rule triggers: (1) unrealized P&L < -$50, (2) invested > $100 and unrealized loss > 20% of invested, (3) 5+ closed trades with <40% win rate and combined P&L < -$10, (4) 3+ closed trades with zero wins
 5. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
 
 ### On Startup
