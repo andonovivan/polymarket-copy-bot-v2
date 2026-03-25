@@ -27,14 +27,26 @@ const totalInvested = computed(() => {
     return props.data?.total_cost ?? 0;
 });
 
+const realizedPnl = computed(() => {
+    return props.data?.realized?.total ?? 0;
+});
+
+// Polymarket-style: Available = Trading Limit - Invested + Realized P&L.
+// Profits expand available capital, losses shrink it.
 const available = computed(() => {
     if (tradingBalance.value === null) return null;
-    return Math.max(0, tradingBalance.value - totalInvested.value);
+    return tradingBalance.value - totalInvested.value + realizedPnl.value;
+});
+
+// Used percent based on how much capital is deployed vs total effective capital.
+const effectiveCapital = computed(() => {
+    if (tradingBalance.value === null || tradingBalance.value <= 0) return 0;
+    return tradingBalance.value + realizedPnl.value;
 });
 
 const usedPercent = computed(() => {
-    if (tradingBalance.value === null || tradingBalance.value <= 0) return 0;
-    return Math.min(100, (totalInvested.value / tradingBalance.value) * 100);
+    if (effectiveCapital.value <= 0) return 0;
+    return Math.min(100, (totalInvested.value / effectiveCapital.value) * 100);
 });
 
 const barColor = computed(() => {
@@ -168,7 +180,7 @@ function fmtUsd(v) {
         <!-- Progress bar -->
         <div v-if="tradingBalance !== null && tradingBalance > 0" class="mt-3">
             <div class="flex justify-between text-xs text-gray-500 mb-1">
-                <span>{{ fmtUsd(totalInvested) }} invested of {{ fmtUsd(tradingBalance) }}</span>
+                <span>{{ fmtUsd(totalInvested) }} invested of {{ fmtUsd(effectiveCapital) }}</span>
                 <span>{{ usedPercent.toFixed(1) }}% used</span>
             </div>
             <div class="w-full bg-gray-800 rounded-full h-2">

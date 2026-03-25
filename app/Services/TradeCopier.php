@@ -152,10 +152,16 @@ class TradeCopier
             if ($tradingBalance !== null && $tradingBalance !== '') {
                 $tradingBalance = (float) $tradingBalance;
                 $totalInvested = (float) Position::where('shares', '>', 0)->sum(DB::raw('buy_price * shares'));
-                if ($tradingBalance > 0 && $totalInvested + $fixedAmountUsdc > $tradingBalance) {
+                // Polymarket-style: realized P&L adjusts available capital.
+                // Profits expand it, losses shrink it.
+                $realizedPnl = (float) PnlSummary::singleton()->total_realized;
+                $available = $tradingBalance - $totalInvested + $realizedPnl;
+                if ($tradingBalance > 0 && $fixedAmountUsdc > $available) {
                     Log::warning('trading_balance_exceeded', [
                         'trade_id' => $trade->tradeId,
                         'total_invested' => round($totalInvested, 2),
+                        'realized_pnl' => round($realizedPnl, 2),
+                        'available' => round($available, 2),
                         'would_add' => $fixedAmountUsdc,
                         'trading_balance' => $tradingBalance,
                     ]);
