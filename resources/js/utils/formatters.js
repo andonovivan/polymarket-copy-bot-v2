@@ -30,6 +30,11 @@ export function traderLabel(row) {
     return name;
 }
 
+export function marketUrl(row) {
+    if (row.market_slug) return `https://polymarket.com/event/${row.market_slug}`;
+    return null;
+}
+
 export function traderUrl(row) {
     const slug = row.trader_slug || row.profile_slug;
     if (slug) return `https://polymarket.com/@${slug}`;

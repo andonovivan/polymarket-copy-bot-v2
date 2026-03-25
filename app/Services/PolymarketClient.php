@@ -181,6 +181,43 @@ class PolymarketClient
     }
 
     /**
+     * Look up the market slug for a CLOB token ID via the Gamma API.
+     * Cached for 24 hours (slugs don't change).
+     */
+    public function getMarketSlug(string $tokenId): ?string
+    {
+        $cacheKey = "market_slug:{$tokenId}";
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached === 'UNKNOWN' ? null : $cached;
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->get('https://gamma-api.polymarket.com/markets', [
+                    'clob_token_ids' => $tokenId,
+                ]);
+
+            if ($response->successful()) {
+                $markets = $response->json();
+                if (!empty($markets) && is_array($markets)) {
+                    $slug = $markets[0]['slug'] ?? null;
+                    if ($slug) {
+                        Cache::put($cacheKey, $slug, 86400);
+                        return $slug;
+                    }
+                }
+            }
+
+            Cache::put($cacheKey, 'UNKNOWN', 3600);
+            return null;
+        } catch (\Throwable $e) {
+            Cache::put($cacheKey, 'UNKNOWN', 3600);
+            return null;
+        }
+    }
+
+    /**
      * Place a limit order on the CLOB. Returns the API response array or null on failure.
      * In dry-run mode, logs the order and returns a stub.
      */

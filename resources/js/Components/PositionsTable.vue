@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl } from '../utils/formatters.js';
 
 const emit = defineEmits(['refresh']);
 const props = defineProps({
@@ -64,7 +64,11 @@ async function closePosition(assetId) {
         </template>
 
         <template #cell-asset_id="{ row }">
-            <span class="font-mono text-xs text-gray-500">{{ shortId(row.asset_id) }}</span>
+            <a v-if="marketUrl(row)" :href="marketUrl(row)" target="_blank"
+               class="font-mono text-xs text-blue-400 hover:text-blue-300 hover:underline">
+                {{ shortId(row.asset_id) }}
+            </a>
+            <span v-else class="font-mono text-xs text-gray-500">{{ shortId(row.asset_id) }}</span>
         </template>
 
         <template #cell-shares="{ row }">{{ row.shares.toFixed(2) }}</template>

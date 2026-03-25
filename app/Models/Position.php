@@ -8,6 +8,7 @@ class Position extends Model
 {
     protected $fillable = [
         'asset_id',
+        'market_slug',
         'copied_from_wallet',
         'shares',
         'exposure',

@@ -66,6 +66,7 @@ class PositionController extends Controller
 
             return [
                 'asset_id' => $pos->asset_id,
+                'market_slug' => $pos->market_slug,
                 'shares' => round($shares, 4),
                 'buy_price' => round($buyPrice, 4),
                 'current_price' => $currentPrice !== null ? round($currentPrice, 4) : null,

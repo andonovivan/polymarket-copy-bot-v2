@@ -223,6 +223,11 @@ class TradeCopier
                 $position->opened_at = now();
             }
 
+            // Fetch market slug on first buy (non-blocking — failure is OK).
+            if (! $position->market_slug) {
+                $position->market_slug = $this->client->getMarketSlug($trade->assetId);
+            }
+
             // Weighted average buy price.
             if ($newShares > 0) {
                 $position->buy_price = (($oldPrice * $oldShares) + ($trade->price * $fixedSize)) / $newShares;
@@ -496,14 +501,16 @@ class TradeCopier
         $summary->updated_at = now();
         $summary->save();
 
-        // Get opened_at and copied_from_wallet from the position.
+        // Get opened_at, copied_from_wallet, and market_slug from the position.
         $position = Position::where('asset_id', $assetId)->first();
         $openedAt = $position?->opened_at;
         $copiedFromWallet = $position?->copied_from_wallet;
+        $marketSlug = $position?->market_slug;
 
         // Create history record.
         TradeHistory::create([
             'asset_id' => $assetId,
+            'market_slug' => $marketSlug,
             'copied_from_wallet' => $copiedFromWallet,
             'buy_price' => $buyPrice,
             'sell_price' => $sellPrice,

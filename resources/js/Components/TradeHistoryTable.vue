@@ -1,6 +1,6 @@
 <script setup>
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl } from '../utils/formatters.js';
 
 const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
@@ -34,7 +34,11 @@ const columns = [
         </template>
 
         <template #cell-asset_id="{ row }">
-            <span class="font-mono text-xs text-gray-500">{{ shortId(row.asset_id) }}</span>
+            <a v-if="marketUrl(row)" :href="marketUrl(row)" target="_blank"
+               class="font-mono text-xs text-blue-400 hover:text-blue-300 hover:underline">
+                {{ shortId(row.asset_id) }}
+            </a>
+            <span v-else class="font-mono text-xs text-gray-500">{{ shortId(row.asset_id) }}</span>
         </template>
 
         <template #cell-buy_price="{ row }">${{ row.buy_price.toFixed(2) }}</template>

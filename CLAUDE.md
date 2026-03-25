@@ -44,8 +44,8 @@ npm run build                    # Build frontend assets
 
 ### Services (`app/Services/`)
 
-- **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active).
-- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes.
+- **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active). Also provides `getMarketSlug(tokenId)` to look up the Polymarket market slug for a CLOB token via Gamma API (cached 24h success, 1h failure).
+- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes. Fetches and stores `market_slug` on first BUY (post-order, non-blocking), copies it to `trade_history` on close via `recordPnl`.
 - **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets using concurrent HTTP requests (`Http::pool`). Batch-checks and batch-inserts SeenTrade records (chunked at 500) instead of per-trade DB queries. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
 - **WalletScoring** - Computes advanced per-wallet metrics: profit factor, rolling-N expectancy, max drawdown %, consistency, and composite score (0-100). Single-query approach: fetches all trade_history ordered by wallet+closed_at, processes in PHP. Weighted score: Profit Factor 25%, Rolling Expectancy 25%, Win Rate 20%, Max Drawdown 15%, Consistency 15%. Used by both CheckWallets (auto-pause rules 5-6) and WalletReportController (score display).
 - **LeaderboardDiscovery** - Fetches top traders from Polymarket leaderboard API (`/v1/leaderboard`). Filters by min PNL/volume thresholds, skips already-tracked wallets. Used by both the scheduled `bot:discover-wallets` command and `GET/POST /api/discover` endpoints.
@@ -65,9 +65,9 @@ npm run build                    # Build frontend assets
 
 | Model          | Purpose                                                        |
 |----------------|----------------------------------------------------------------|
-| `Position`     | Open positions (asset_id, shares, buy_price, current_price)    |
+| `Position`     | Open positions (asset_id, market_slug, shares, buy_price, current_price) |
 | `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug, is_paused, paused_at, pause_reason) |
-| `TradeHistory` | Closed trade records (buy/sell price, shares, pnl, timestamps) |
+| `TradeHistory` | Closed trade records (market_slug, buy/sell price, shares, pnl, timestamps) |
 | `PnlSummary`   | Singleton row with aggregate P&L stats                         |
 | `BotMeta`      | Key-value store for bot metadata (last_running_ts, polymarket_balance, trading_balance) |
 | `SeenTrade`    | Transaction hashes of already-processed trades                 |
@@ -80,8 +80,8 @@ npm run build                    # Build frontend assets
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested. Receives filtered or unfiltered data via `displayData` computed from Dashboard.
 - **DataTable.vue** - Generic server-side paginated, sortable table component. Handles fetch, sort, pagination, per-page size selector (10/25/50/100), loading spinner, and empty state. Columns can be marked `sortable: false` to disable sorting (no cursor/arrow, click ignored). Exposes scoped slots (`#cell-{key}`, `#row-actions`, `#above-table`, `#extra-headers`) for custom cell rendering. Supports `extraParams` prop for appending arbitrary query params (including arrays) to API requests — watched via `JSON.stringify` to re-fetch with page reset only when values actually change. Used by PositionsTable, TradeHistoryTable, and WalletReport.
 - **Pagination.vue** - Shared pagination (First/Prev/Next/Last) with per-page size dropdown. Used by all tables including WalletsManager.
-- **PositionsTable.vue** - Uses DataTable with `apiUrl="/api/positions"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Custom slots for Close button, status badges, null price handling, and trader profile links.
-- **TradeHistoryTable.vue** - Uses DataTable with `apiUrl="/api/trades"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Minimal custom slots (trader link, P&L coloring).
+- **PositionsTable.vue** - Uses DataTable with `apiUrl="/api/positions"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Custom slots for Close button, status badges, null price handling, trader profile links, and market links (asset ID links to `polymarket.com/event/{slug}` when `market_slug` is available).
+- **TradeHistoryTable.vue** - Uses DataTable with `apiUrl="/api/trades"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Custom slots for trader link, P&L coloring, and market links (asset ID links to Polymarket when `market_slug` available).
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
 - **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Summary cards fetched independently from `GET /api/wallet-report/summary` (totals across all wallets, not just current page). Composite score column (0-100) with color gradient and hover tooltip showing score breakdown (profit factor, expectancy, win rate, drawdown, consistency). Pause/Resume buttons and win rate coloring.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
@@ -132,14 +132,14 @@ All trading parameters are configurable via `.env`:
 |------------------------|--------------------------------------|----------------------------------------------|
 | CLOB API               | `https://clob.polymarket.com`        | Order placement, midpoints, balance, markets  |
 | Data API               | `https://data-api.polymarket.com`    | Fetching trades by wallet, leaderboard        |
-| Gamma API              | `https://gamma-api.polymarket.com`   | Market resolution status lookup               |
+| Gamma API              | `https://gamma-api.polymarket.com`   | Market resolution status lookup, market slug lookup |
 
 ## Execution Flow
 
 ### Normal Operation (bot running)
 
 1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
-2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
+2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Backfills `market_slug` for up to 5 positions per cycle that don't have one yet (via Gamma API, cached 24h). Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
 4. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses if ANY rule triggers: (1) unrealized P&L < -$50, (2) invested > $100 and unrealized loss > 20% of invested, (3) 5+ closed trades with <40% win rate and combined P&L < -$10, (4) 3+ closed trades with zero wins, (5) 20+ trades with negative rolling expectancy, (6) 10+ trades with profit factor < 1.0
 5. **Hourly** - `bot:discover-wallets`: Fetches Polymarket leaderboard, auto-adds up to 3 top traders meeting PNL/volume thresholds (skips already-tracked)
@@ -161,7 +161,7 @@ All trading parameters are configurable via `.env`:
 6. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
 7. Exposure cap: skip if would exceed $100 per market
 8. Place order via CLOB API (or log in dry-run mode)
-9. Update position with weighted-average buy price, save to DB
+9. Update position with weighted-average buy price, fetch market_slug from Gamma API on first buy (post-order, non-blocking), save to DB
 
 ## Key Design Decisions
 
@@ -174,6 +174,7 @@ All trading parameters are configurable via `.env`:
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys.
+- **Market links** - Each position and trade history record stores a `market_slug` (nullable) fetched from the Gamma API on first BUY. The slug is cached 24h in Laravel cache and persisted in DB so dashboard API endpoints make zero external calls. `bot:update-prices` backfills slugs for existing positions (max 5/cycle). The slug is copied from position to trade_history on close. Frontend renders asset IDs as clickable links to `polymarket.com/event/{slug}` when available, with graceful fallback to plain text.
 - **Market resolution handling** - Resolved markets (no orderbook) are detected and closed with correct payout ($1 for winners, $0 for losers, partial for voided).
 - **Wallet pause/stop** - Wallets can be manually paused from the UI or auto-paused by `bot:check-wallets` based on configurable performance thresholds. Paused wallets stop being polled for new trades but existing positions remain open and manageable. Auto-paused wallets show a distinct red "Paused (Auto)" badge vs orange "Paused" for manual. Resuming is always manual via UI.
 - **Wallet discovery** - Top traders auto-discovered hourly from the Polymarket leaderboard API (Data API `/v1/leaderboard`). Filters by PNL and volume thresholds. Max 3 auto-adds per run to prevent flooding. Manual discovery via the Discover tab allows scanning with custom time period/category and one-click adding.
@@ -218,7 +219,7 @@ app/
     TradeTracker.php         # Wallet polling + trade detection
 config/
   polymarket.php             # All trading configuration
-database/migrations/         # 10 migration files (includes performance indexes)
+database/migrations/         # 11 migration files (includes performance indexes, market_slug)
 resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
   Components/
@@ -233,7 +234,7 @@ resources/js/
     WalletsManager.vue       # Wallet CRUD UI (client-side pagination)
     WalletReport.vue         # Per-wallet performance report (uses DataTable)
   utils/
-    formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl
+    formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl
 routes/
   api.php                    # API endpoints
   console.php                # Scheduled tasks

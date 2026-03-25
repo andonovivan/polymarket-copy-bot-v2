@@ -77,6 +77,20 @@ class UpdatePrices extends Command
             }
         }
 
+        // Backfill market_slug for positions that don't have one yet (max 5 per cycle).
+        $missingSlug = Position::where('shares', '>', 0)
+            ->whereNull('market_slug')
+            ->limit(5)
+            ->get();
+
+        foreach ($missingSlug as $pos) {
+            $slug = $client->getMarketSlug($pos->asset_id);
+            if ($slug) {
+                $pos->market_slug = $slug;
+                $pos->save();
+            }
+        }
+
         // Cache Polymarket account balance.
         if (! config('polymarket.dry_run')) {
             $balance = $client->getBalanceUsdc();
