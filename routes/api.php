@@ -3,6 +3,7 @@
 use App\Http\Controllers\BalanceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiscoverController;
+use App\Http\Controllers\GlobalPauseController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\TradeHistoryController;
 use App\Http\Controllers\WalletController;
@@ -18,6 +19,8 @@ Route::put('/wallets', [WalletController::class, 'update']);
 Route::patch('/wallets/pause', [WalletController::class, 'togglePause']);
 Route::delete('/wallets', [WalletController::class, 'destroy']);
 Route::post('/close', [PositionController::class, 'close']);
+Route::post('/close-all', [PositionController::class, 'closeAll']);
+Route::post('/global-pause', [GlobalPauseController::class, 'toggle']);
 Route::put('/balance', [BalanceController::class, 'update']);
 Route::get('/wallet-report', [WalletReportController::class, 'index']);
 Route::get('/wallet-report/summary', [WalletReportController::class, 'summary']);

@@ -58,6 +58,7 @@ class DashboardController extends Controller
             'polymarket_balance' => BotMeta::getValue('polymarket_balance'),
             'trading_balance' => BotMeta::getValue('trading_balance'),
             'dry_run' => config('polymarket.dry_run'),
+            'global_paused' => BotMeta::getValue('global_paused') === '1',
             'tracked_wallets' => TrackedWallet::count(),
             'ts' => time(),
         ]);

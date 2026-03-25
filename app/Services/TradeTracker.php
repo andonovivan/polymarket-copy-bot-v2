@@ -65,6 +65,11 @@ class TradeTracker
      */
     public function poll(): array
     {
+        // Global pause — skip all polling to save resources.
+        if (BotMeta::getValue('global_paused') === '1') {
+            return [];
+        }
+
         $wallets = TrackedWallet::where('is_paused', false)->pluck('address')->all();
         if (empty($wallets)) {
             return [];

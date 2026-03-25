@@ -95,6 +95,13 @@ class TradeCopier
      */
     public function copy(DetectedTrade $trade): bool
     {
+        // --- Global pause ---
+        if (BotMeta::getValue('global_paused') === '1') {
+            Log::info('skipped_global_paused', ['trade_id' => $trade->tradeId]);
+
+            return false;
+        }
+
         // --- Sell filter ---
         if ($trade->side === 'SELL' && ! config('polymarket.copy_sells')) {
             Log::info('skipped_sell', ['trade_id' => $trade->tradeId]);

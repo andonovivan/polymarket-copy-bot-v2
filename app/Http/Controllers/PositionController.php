@@ -98,4 +98,33 @@ class PositionController extends Controller
 
         return response()->json($result, $status);
     }
+
+    /**
+     * Close all open positions at current midpoint prices.
+     */
+    public function closeAll(TradeCopier $copier): JsonResponse
+    {
+        $positions = Position::where('shares', '>', 0)->get();
+        if ($positions->isEmpty()) {
+            return response()->json(['ok' => true, 'closed' => 0, 'failed' => 0]);
+        }
+
+        $closed = 0;
+        $failed = 0;
+
+        foreach ($positions as $position) {
+            $result = $copier->closePosition($position->asset_id);
+            if (isset($result['ok'])) {
+                $closed++;
+            } else {
+                $failed++;
+            }
+        }
+
+        return response()->json([
+            'ok' => true,
+            'closed' => $closed,
+            'failed' => $failed,
+        ]);
+    }
 }

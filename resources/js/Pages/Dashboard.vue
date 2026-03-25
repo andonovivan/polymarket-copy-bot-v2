@@ -11,6 +11,8 @@ import WalletDiscovery from '../Components/WalletDiscovery.vue';
 const activeTab = ref('dashboard');
 const data = ref(null);
 const loading = ref(true);
+const pauseLoading = ref(false);
+const closeAllLoading = ref(false);
 
 // Per-tab refresh triggers — only the active tab gets incremented.
 const dashboardRefresh = ref(0);
@@ -38,6 +40,41 @@ function refresh() {
     else if (activeTab.value === 'report') reportRefresh.value++;
 }
 
+async function toggleGlobalPause() {
+    const newState = !data.value?.global_paused;
+    if (newState && !confirm('Pause the bot? No new trades will be copied until you resume.')) return;
+    pauseLoading.value = true;
+    try {
+        await fetch('/api/global-pause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paused: newState }),
+        });
+        refresh();
+    } catch (e) {
+        console.error('Failed to toggle global pause', e);
+    } finally {
+        pauseLoading.value = false;
+    }
+}
+
+async function closeAllPositions() {
+    const count = data.value?.open_positions_count ?? 0;
+    if (!confirm(`Close all ${count} open positions? This will sell everything at current market prices.`)) return;
+    closeAllLoading.value = true;
+    try {
+        const r = await fetch('/api/close-all', { method: 'POST' });
+        const d = await r.json();
+        alert(`Closed ${d.closed} position(s)` + (d.failed > 0 ? `, ${d.failed} failed` : ''));
+        refresh();
+    } catch (e) {
+        console.error('Failed to close all', e);
+        alert('Failed to close positions');
+    } finally {
+        closeAllLoading.value = false;
+    }
+}
+
 // On tab switch, bump the newly active tab's trigger so it fetches fresh data.
 watch(activeTab, (newTab) => {
     if (newTab === 'dashboard') dashboardRefresh.value++;
@@ -63,17 +100,41 @@ function fmtTime(ts) {
 <template>
     <div class="min-h-screen bg-gray-950 text-gray-300 p-5 font-mono">
         <div class="max-w-7xl mx-auto">
-            <h1 class="text-2xl font-bold text-blue-400 mb-1">
-                Polymarket Copy Bot
-                <span v-if="data?.dry_run"
-                      class="ml-2 text-xs bg-yellow-600 text-gray-950 px-2 py-0.5 rounded font-bold">
-                    DRY RUN
-                </span>
-            </h1>
-            <p class="text-gray-500 text-sm mb-5">
-                Tracking {{ data?.tracked_wallets ?? '-' }} wallets &middot;
-                Updated {{ data ? fmtTime(data.ts) : '-' }}
-            </p>
+            <div class="flex items-start justify-between mb-1">
+                <div>
+                    <h1 class="text-2xl font-bold text-blue-400">
+                        Polymarket Copy Bot
+                        <span v-if="data?.dry_run"
+                              class="ml-2 text-xs bg-yellow-600 text-gray-950 px-2 py-0.5 rounded font-bold align-middle">
+                            DRY RUN
+                        </span>
+                        <span v-if="data?.global_paused"
+                              class="ml-2 text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold align-middle animate-pulse">
+                            BOT PAUSED
+                        </span>
+                    </h1>
+                    <p class="text-gray-500 text-sm mt-1">
+                        Tracking {{ data?.tracked_wallets ?? '-' }} wallets &middot;
+                        Updated {{ data ? fmtTime(data.ts) : '-' }}
+                    </p>
+                </div>
+                <div class="flex gap-2 shrink-0 ml-4">
+                    <button @click="toggleGlobalPause" :disabled="pauseLoading"
+                            :class="[
+                                'text-sm font-semibold px-4 py-2 rounded transition-colors disabled:opacity-50',
+                                data?.global_paused
+                                    ? 'bg-green-700 hover:bg-green-600 text-white'
+                                    : 'bg-orange-600 hover:bg-orange-500 text-white'
+                            ]">
+                        {{ data?.global_paused ? '&#9654; Resume Bot' : '&#9208; Pause Bot' }}
+                    </button>
+                    <button @click="closeAllPositions" :disabled="closeAllLoading || (data?.open_positions_count ?? 0) === 0"
+                            class="text-sm font-semibold px-4 py-2 rounded bg-red-700 hover:bg-red-600 text-white transition-colors disabled:opacity-50">
+                        {{ closeAllLoading ? 'Closing...' : 'Close All' }}
+                    </button>
+                </div>
+            </div>
+            <div class="mb-5"></div>
 
             <!-- Tabs -->
             <div class="flex border-b border-gray-700 mb-5">
