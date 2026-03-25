@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\BotMeta;
 use App\Models\PnlSummary;
-use App\Models\Position;
 use App\Models\TrackedWallet;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
@@ -23,25 +23,21 @@ class DashboardController extends Controller
      *
      * Reads all prices from the DB (populated by bot:update-prices).
      * Zero external API calls — response is instant.
+     * Uses DB aggregates instead of loading all rows into PHP.
      */
     public function data()
     {
-        $totalUnrealized = 0.0;
-        $totalCost = 0.0;
-        $openPositionCount = 0;
+        // Single query to compute all position stats.
+        $posStats = DB::table('positions')
+            ->where('shares', '>', 0)
+            ->selectRaw('COUNT(*) as count')
+            ->selectRaw('COALESCE(SUM(buy_price * shares), 0) as total_cost')
+            ->selectRaw('COALESCE(SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END), 0) as total_unrealized')
+            ->first();
 
-        // Compute summary stats from all open positions.
-        foreach (Position::where('shares', '>', 0)->get() as $pos) {
-            $cost = (float) $pos->buy_price * (float) $pos->shares;
-            $currentValue = $pos->current_price !== null ? (float) $pos->current_price * (float) $pos->shares : null;
-            $unrealized = $currentValue !== null ? $currentValue - $cost : null;
-
-            if ($unrealized !== null) {
-                $totalUnrealized += $unrealized;
-            }
-            $totalCost += $cost;
-            $openPositionCount++;
-        }
+        $openPositionCount = (int) $posStats->count;
+        $totalCost = round((float) $posStats->total_cost, 4);
+        $totalUnrealized = round((float) $posStats->total_unrealized, 4);
 
         $pnl = PnlSummary::singleton();
         $totalTrades = $pnl->total_trades;
@@ -49,8 +45,8 @@ class DashboardController extends Controller
 
         return response()->json([
             'open_positions_count' => $openPositionCount,
-            'total_unrealized' => round($totalUnrealized, 4),
-            'total_cost' => round($totalCost, 4),
+            'total_unrealized' => $totalUnrealized,
+            'total_cost' => $totalCost,
             'realized' => [
                 'total' => round((float) $pnl->total_realized, 4),
                 'trades' => $totalTrades,

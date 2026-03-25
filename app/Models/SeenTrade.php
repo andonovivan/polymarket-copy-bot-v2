@@ -19,6 +19,7 @@ class SeenTrade extends Model
 
     /**
      * Prune to max entries, deleting oldest.
+     * Uses a single subquery delete instead of loading IDs into PHP memory.
      */
     public static function prune(int $maxEntries = 50000): void
     {
@@ -28,7 +29,13 @@ class SeenTrade extends Model
         }
 
         $excess = $count - $maxEntries;
-        $ids = self::orderBy('id')->limit($excess)->pluck('id');
-        self::whereIn('id', $ids)->delete();
+
+        // Delete oldest rows directly — avoids loading IDs into memory.
+        // MariaDB/MySQL doesn't support LIMIT in subquery DELETE, so use a
+        // subquery to find the cutoff ID.
+        $cutoffId = self::orderBy('id')->skip($excess)->value('id');
+        if ($cutoffId) {
+            self::where('id', '<', $cutoffId)->delete();
+        }
     }
 }

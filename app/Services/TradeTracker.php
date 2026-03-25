@@ -59,6 +59,8 @@ class TradeTracker
      * On the first poll (no seen trades in DB), seeds all existing trade IDs
      * without returning them — prevents copying old trades.
      *
+     * Uses concurrent HTTP requests and batch DB operations for efficiency.
+     *
      * @return DetectedTrade[]
      */
     public function poll(): array
@@ -69,53 +71,115 @@ class TradeTracker
         }
 
         $seeded = SeenTrade::exists();
-        $newTrades = [];
 
+        // Fetch trades from all wallets concurrently.
+        $responses = Http::pool(function ($pool) use ($wallets) {
+            foreach ($wallets as $wallet) {
+                $pool->as($wallet)
+                    ->timeout(15)
+                    ->get(config('polymarket.data_api_url') . '/trades', [
+                        'user' => $wallet,
+                        'limit' => self::POLL_LIMIT,
+                    ]);
+            }
+        });
+
+        // Collect all trade IDs from all wallets for a single batch lookup.
+        $allRawTrades = []; // ['wallet' => ..., 'trade' => ..., 'tradeId' => ...]
         foreach ($wallets as $wallet) {
-            $rawTrades = self::fetchUserTrades($wallet, self::POLL_LIMIT);
+            $response = $responses[$wallet] ?? null;
+            if (! $response || ! $response->successful()) {
+                if ($response) {
+                    Log::warning('trade_fetch_failed', [
+                        'wallet' => substr($wallet, 0, 10) . '...',
+                        'status' => $response->status(),
+                    ]);
+                }
 
-            foreach ($rawTrades as $t) {
+                continue;
+            }
+
+            $trades = $response->json() ?? [];
+            foreach ($trades as $t) {
                 $tradeId = $t['transactionHash'] ?? '';
                 if (! $tradeId) {
                     continue;
                 }
+                $allRawTrades[] = [
+                    'wallet' => $wallet,
+                    'trade' => $t,
+                    'tradeId' => $tradeId,
+                ];
+            }
+        }
 
-                // Check if already seen (DB lookup).
-                if (SeenTrade::where('transaction_hash', $tradeId)->exists()) {
-                    continue;
-                }
+        if (empty($allRawTrades)) {
+            return [];
+        }
 
-                // Mark as seen.
-                SeenTrade::create([
-                    'transaction_hash' => $tradeId,
-                    'created_at' => now(),
-                ]);
+        // Batch-check which trade IDs are already seen (chunked to avoid query limits).
+        $allTradeIds = array_unique(array_column($allRawTrades, 'tradeId'));
+        $alreadySeen = [];
+        foreach (array_chunk($allTradeIds, 500) as $chunk) {
+            foreach (SeenTrade::whereIn('transaction_hash', $chunk)->pluck('transaction_hash') as $hash) {
+                $alreadySeen[$hash] = true;
+            }
+        }
 
-                // First poll: seed only — don't return trades.
-                if (! $seeded) {
-                    continue;
-                }
+        // Filter to only new trades and batch-insert them.
+        $newTradeIds = [];
+        $newTrades = [];
 
-                $detected = new DetectedTrade(
-                    tradeId: $tradeId,
-                    wallet: $wallet,
-                    assetId: $t['asset'] ?? '',
-                    side: $t['side'] ?? 'BUY',
-                    price: (float) ($t['price'] ?? 0),
-                    size: (float) ($t['size'] ?? 0),
-                    timestamp: (int) ($t['timestamp'] ?? 0),
-                    raw: $t,
-                );
+        foreach ($allRawTrades as $entry) {
+            if (isset($alreadySeen[$entry['tradeId']])) {
+                continue;
+            }
 
-                $newTrades[] = $detected;
+            // Avoid duplicates within the same batch (same tx can appear for multiple wallets).
+            if (isset($newTradeIds[$entry['tradeId']])) {
+                continue;
+            }
+            $newTradeIds[$entry['tradeId']] = true;
 
-                Log::info('new_trade_detected', [
-                    'wallet' => substr($wallet, 0, 10) . '...',
-                    'side' => $detected->side,
-                    'price' => $detected->price,
-                    'size' => $detected->size,
-                    'asset_id' => substr($detected->assetId, 0, 16) . '...',
-                ]);
+            // First poll: seed only — don't return trades.
+            if (! $seeded) {
+                continue;
+            }
+
+            $t = $entry['trade'];
+            $detected = new DetectedTrade(
+                tradeId: $entry['tradeId'],
+                wallet: $entry['wallet'],
+                assetId: $t['asset'] ?? '',
+                side: $t['side'] ?? 'BUY',
+                price: (float) ($t['price'] ?? 0),
+                size: (float) ($t['size'] ?? 0),
+                timestamp: (int) ($t['timestamp'] ?? 0),
+                raw: $t,
+            );
+
+            $newTrades[] = $detected;
+
+            Log::info('new_trade_detected', [
+                'wallet' => substr($entry['wallet'], 0, 10) . '...',
+                'side' => $detected->side,
+                'price' => $detected->price,
+                'size' => $detected->size,
+                'asset_id' => substr($detected->assetId, 0, 16) . '...',
+            ]);
+        }
+
+        // Batch-insert all new seen trade IDs (single INSERT with multiple rows).
+        if (! empty($newTradeIds)) {
+            $now = now();
+            $rows = array_map(fn ($hash) => [
+                'transaction_hash' => $hash,
+                'created_at' => $now,
+            ], array_keys($newTradeIds));
+
+            // Insert in chunks to avoid exceeding DB packet limits.
+            foreach (array_chunk($rows, 500) as $chunk) {
+                SeenTrade::insert($chunk);
             }
         }
 

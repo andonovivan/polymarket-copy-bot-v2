@@ -2,10 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Position;
 use App\Models\TrackedWallet;
-use App\Models\TradeHistory;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CheckWallets extends Command
@@ -29,29 +28,44 @@ class CheckWallets extends Command
         $badRecordMaxLoss = (float) config('polymarket.auto_pause_bad_record_max_loss', -10);
         $zeroWinMinTrades = (int) config('polymarket.auto_pause_zero_win_min_trades', 3);
 
+        $addresses = $wallets->pluck('address')->all();
+
+        // Batch-fetch realized stats per wallet in a single query.
+        $realizedStats = DB::table('trade_history')
+            ->select('copied_from_wallet')
+            ->selectRaw('COUNT(*) as total_trades')
+            ->selectRaw('SUM(CASE WHEN pnl >= 0 THEN 1 ELSE 0 END) as winning_trades')
+            ->selectRaw('SUM(pnl) as realized_pnl')
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->get()
+            ->keyBy('copied_from_wallet');
+
+        // Batch-fetch unrealized stats per wallet in a single query.
+        $positionStats = DB::table('positions')
+            ->select('copied_from_wallet')
+            ->selectRaw('SUM(buy_price * shares) as total_invested')
+            ->selectRaw('SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END) as unrealized_pnl')
+            ->where('shares', '>', 0)
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->get()
+            ->keyBy('copied_from_wallet');
+
         $pausedCount = 0;
 
         foreach ($wallets as $wallet) {
             $address = $wallet->address;
 
-            // Compute realized stats from trade history.
-            $trades = TradeHistory::where('copied_from_wallet', $address)->get();
-            $totalTrades = $trades->count();
-            $winningTrades = $trades->where('pnl', '>=', 0)->count();
+            $rs = $realizedStats[$address] ?? null;
+            $totalTrades = $rs ? (int) $rs->total_trades : 0;
+            $winningTrades = $rs ? (int) $rs->winning_trades : 0;
             $winRate = $totalTrades > 0 ? round($winningTrades / $totalTrades * 100, 1) : null;
-            $realizedPnl = (float) $trades->sum('pnl');
+            $realizedPnl = $rs ? (float) $rs->realized_pnl : 0.0;
 
-            // Compute unrealized P&L and total invested from open positions.
-            $unrealizedPnl = 0.0;
-            $totalInvested = 0.0;
-            foreach (Position::where('shares', '>', 0)->where('copied_from_wallet', $address)->get() as $pos) {
-                $cost = (float) $pos->buy_price * (float) $pos->shares;
-                $totalInvested += $cost;
-                $value = $pos->current_price !== null ? (float) $pos->current_price * (float) $pos->shares : null;
-                if ($value !== null) {
-                    $unrealizedPnl += $value - $cost;
-                }
-            }
+            $ps = $positionStats[$address] ?? null;
+            $totalInvested = $ps ? (float) $ps->total_invested : 0.0;
+            $unrealizedPnl = $ps ? (float) $ps->unrealized_pnl : 0.0;
 
             $combinedPnl = round($realizedPnl + $unrealizedPnl, 4);
 

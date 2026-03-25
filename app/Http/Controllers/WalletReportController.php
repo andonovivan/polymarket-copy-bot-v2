@@ -2,16 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Position;
-use App\Models\TradeHistory;
 use App\Models\TrackedWallet;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class WalletReportController extends Controller
 {
     /**
      * Paginated wallet performance report with server-side sorting.
+     *
+     * Uses SQL aggregation instead of loading all trades/positions into PHP.
      */
     public function index(Request $request): JsonResponse
     {
@@ -20,8 +21,9 @@ class WalletReportController extends Controller
         $sort = $request->input('sort', 'combined_pnl');
         $order = strtolower($request->input('order', 'desc')) === 'asc' ? 'asc' : 'desc';
 
-        // Build full report in memory (wallet count is small — typically < 50).
+        // Build full report — wallet count is small (typically < 100).
         $walletLookup = TrackedWallet::all()->keyBy('address');
+        $addresses = $walletLookup->keys()->all();
 
         $report = [];
         foreach ($walletLookup as $addr => $w) {
@@ -42,34 +44,47 @@ class WalletReportController extends Controller
             ];
         }
 
-        // Aggregate realized stats.
-        foreach (TradeHistory::all() as $t) {
-            $w = $t->copied_from_wallet;
+        // Batch-aggregate realized stats with a single query.
+        $realizedStats = DB::table('trade_history')
+            ->select('copied_from_wallet')
+            ->selectRaw('COUNT(*) as total_trades')
+            ->selectRaw('SUM(CASE WHEN pnl >= 0 THEN 1 ELSE 0 END) as winning_trades')
+            ->selectRaw('SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades')
+            ->selectRaw('SUM(pnl) as realized_pnl')
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->get();
+
+        foreach ($realizedStats as $rs) {
+            $w = $rs->copied_from_wallet;
             if (! isset($report[$w])) {
                 continue;
             }
-            $report[$w]['realized_pnl'] += (float) $t->pnl;
-            $report[$w]['total_trades']++;
-            if ((float) $t->pnl >= 0) {
-                $report[$w]['winning_trades']++;
-            } else {
-                $report[$w]['losing_trades']++;
-            }
+            $report[$w]['total_trades'] = (int) $rs->total_trades;
+            $report[$w]['winning_trades'] = (int) $rs->winning_trades;
+            $report[$w]['losing_trades'] = (int) $rs->losing_trades;
+            $report[$w]['realized_pnl'] = (float) $rs->realized_pnl;
         }
 
-        // Aggregate unrealized stats from open positions.
-        foreach (Position::where('shares', '>', 0)->get() as $pos) {
-            $w = $pos->copied_from_wallet;
-            if (! $w || ! isset($report[$w])) {
+        // Batch-aggregate unrealized stats with a single query.
+        $positionStats = DB::table('positions')
+            ->select('copied_from_wallet')
+            ->selectRaw('COUNT(*) as open_positions')
+            ->selectRaw('SUM(buy_price * shares) as total_invested')
+            ->selectRaw('SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END) as unrealized_pnl')
+            ->where('shares', '>', 0)
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->get();
+
+        foreach ($positionStats as $ps) {
+            $w = $ps->copied_from_wallet;
+            if (! isset($report[$w])) {
                 continue;
             }
-            $cost = (float) $pos->buy_price * (float) $pos->shares;
-            $report[$w]['open_positions']++;
-            $report[$w]['total_invested'] += $cost;
-            $value = $pos->current_price !== null ? (float) $pos->current_price * (float) $pos->shares : null;
-            if ($value !== null) {
-                $report[$w]['unrealized_pnl'] += $value - $cost;
-            }
+            $report[$w]['open_positions'] = (int) $ps->open_positions;
+            $report[$w]['total_invested'] = (float) $ps->total_invested;
+            $report[$w]['unrealized_pnl'] = (float) $ps->unrealized_pnl;
         }
 
         // Compute derived fields.
