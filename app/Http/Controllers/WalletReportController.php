@@ -172,6 +172,9 @@ class WalletReportController extends Controller
             return $r;
         }, $report));
 
+        // Filter out wallets with no activity (no trades and no open positions).
+        $rows = array_values(array_filter($rows, fn ($r) => $r['total_trades'] > 0 || $r['open_positions'] > 0));
+
         // Sort.
         $sortKey = $sort;
         usort($rows, function ($a, $b) use ($sortKey, $order) {
