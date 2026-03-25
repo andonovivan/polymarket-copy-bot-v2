@@ -119,7 +119,7 @@ watch(() => props.refreshTrigger, fetchWallets);
                 </svg>
             </button>
 
-            <div v-if="dropdownOpen"
+            <div v-if="dropdownOpen" @click.stop
                  class="absolute top-full left-0 mt-1 w-72 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
                 <!-- Search -->
                 <div class="p-2 border-b border-gray-700">
