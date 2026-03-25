@@ -35,22 +35,23 @@ npm run build                    # Build frontend assets
 
 | Command              | Interval    | Purpose                                      |
 |----------------------|-------------|----------------------------------------------|
-| `bot:poll`           | Every 30s   | Fetch trades from tracked wallets, copy them  |
+| `bot:poll`           | Every 30s   | Fetch trades from active (non-paused) wallets, copy them |
 | `bot:update-prices`  | Every 30s   | Update current prices in DB for the dashboard |
 | `bot:check-resolved` | Every 5 min | Close positions in resolved markets           |
+| `bot:check-wallets`  | Every 5 min | Auto-pause wallets with poor performance      |
 
 ### Services (`app/Services/`)
 
 - **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active).
 - **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes.
-- **TradeTracker** - Polls Polymarket Data API for new trades. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
+- **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
 
 ### Controllers (`app/Http/Controllers/`)
 
 - **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns summary stats, wallet report, and balance info from DB (no positions/trades arrays — those use separate paginated endpoints).
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
-- **WalletController** - CRUD for tracked wallets: `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `DELETE /api/wallets` (remove).
+- **WalletController** - CRUD for tracked wallets: `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 
 ### Models (`app/Models/`)
@@ -58,7 +59,7 @@ npm run build                    # Build frontend assets
 | Model          | Purpose                                                        |
 |----------------|----------------------------------------------------------------|
 | `Position`     | Open positions (asset_id, shares, buy_price, current_price)    |
-| `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug)   |
+| `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug, is_paused, paused_at, pause_reason) |
 | `TradeHistory` | Closed trade records (buy/sell price, shares, pnl, timestamps) |
 | `PnlSummary`   | Singleton row with aggregate P&L stats                         |
 | `BotMeta`      | Key-value store for bot metadata (last_running_ts, polymarket_balance, trading_balance) |
@@ -71,8 +72,8 @@ npm run build                    # Build frontend assets
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
 - **PositionsTable.vue** - Server-side paginated, sortable table of open positions. Fetches from `GET /api/positions` with page/sort/order params. Includes Close button and trader profile links.
 - **TradeHistoryTable.vue** - Server-side paginated, sortable table of closed trades. Fetches from `GET /api/trades` with page/sort/order params.
-- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug.
-- **WalletReport.vue** - Per-wallet performance report with combined/realized/unrealized P&L, win rate, trade counts, and performance rating badges.
+- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause.
+- **WalletReport.vue** - Per-wallet performance report with combined/realized/unrealized P&L, win rate, trade counts, performance rating badges, pause status (Active/Paused/Paused Auto) and Pause/Resume action buttons. Summary cards include paused wallet count.
 
 ### Configuration (`config/polymarket.php`)
 
@@ -89,6 +90,9 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
 | `POLYMARKET_DRY_RUN`          | true                            | Log only, no real orders             |
+| `POLYMARKET_AUTO_PAUSE_MIN_TRADES` | 10                        | Min trades before auto-pause evaluates |
+| `POLYMARKET_AUTO_PAUSE_MAX_WIN_RATE` | 30                      | Win rate % below which wallet may be paused |
+| `POLYMARKET_AUTO_PAUSE_MAX_LOSS` | -15                          | Combined P&L below which wallet may be paused |
 
 ### External APIs
 
@@ -102,10 +106,11 @@ All trading parameters are configurable via `.env`:
 
 ### Normal Operation (bot running)
 
-1. **Every 30s** - `bot:poll`: Fetches trades from all tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
+1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
 2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
-4. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
+4. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses those with 10+ trades, <30% win rate, and <-$15 combined P&L
+5. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
 
 ### On Startup
 
@@ -115,7 +120,7 @@ All trading parameters are configurable via `.env`:
 
 ### Trade Copy Pipeline
 
-1. Detect new trade from tracked wallet
+1. Detect new trade from active (non-paused) tracked wallet
 2. Filter: skip sells if disabled, skip zero price
 3. Calculate size: `$2 / trade_price` for buys, all held shares for sells
 4. Price sanity: skip if midpoint deviates > 3 cents from trade price
@@ -133,6 +138,7 @@ All trading parameters are configurable via `.env`:
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys.
 - **Market resolution handling** - Resolved markets (no orderbook) are detected and closed with correct payout ($1 for winners, $0 for losers, partial for voided).
+- **Wallet pause/stop** - Wallets can be manually paused from the UI or auto-paused by `bot:check-wallets` based on configurable performance thresholds. Paused wallets stop being polled for new trades but existing positions remain open and manageable. Auto-paused wallets show a distinct red "Paused (Auto)" badge vs orange "Paused" for manual. Resuming is always manual via UI.
 
 ## File Structure
 
@@ -142,6 +148,7 @@ app/
     BotPoll.php              # bot:poll - one poll cycle
     BotReconcile.php         # Startup reconciliation (called from BotPoll)
     CheckResolved.php        # bot:check-resolved - close resolved positions
+    CheckWallets.php         # bot:check-wallets - auto-pause poor performers
     MigrateFromPython.php    # bot:migrate-from-python - one-time import
     UpdatePrices.php         # bot:update-prices - cache midpoints in DB
   DTOs/
@@ -151,13 +158,13 @@ app/
     DashboardController.php  # Dashboard page + /api/data (summary stats only)
     PositionController.php   # GET /api/positions (paginated) + POST /api/close
     TradeHistoryController.php # GET /api/trades (paginated)
-    WalletController.php     # CRUD /api/wallets
+    WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
   Models/
     BotMeta.php              # Key-value metadata store
     PnlSummary.php           # Aggregate P&L singleton
     Position.php             # Open positions
     SeenTrade.php            # Deduplication of processed trades
-    TrackedWallet.php        # Tracked wallet addresses
+    TrackedWallet.php        # Tracked wallet addresses (with pause state)
     TradeHistory.php         # Closed trade records
   Services/
     PolymarketClient.php     # CLOB/Gamma API integration
@@ -165,7 +172,7 @@ app/
     TradeTracker.php         # Wallet polling + trade detection
 config/
   polymarket.php             # All trading configuration
-database/migrations/         # 8 migration files
+database/migrations/         # 9 migration files
 resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report)
   Components/

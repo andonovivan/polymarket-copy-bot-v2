@@ -91,7 +91,7 @@ function fmtTime(ts) {
             <!-- Report Tab -->
             <div v-show="activeTab === 'report'">
                 <h2 class="text-blue-400 text-base mb-3">Wallet Performance Report</h2>
-                <WalletReport v-if="data" :wallets="data.wallet_report || []" />
+                <WalletReport v-if="data" :wallets="data.wallet_report || []" @refresh="refresh" />
             </div>
 
             <p class="text-gray-600 text-xs mt-6">Auto-refreshes every 10s</p>

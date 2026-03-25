@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 
 const props = defineProps({ wallets: Array });
+const emit = defineEmits(['refresh']);
 
 const sortKey = ref('combined_pnl');
 const sortAsc = ref(false);
@@ -49,6 +50,25 @@ function traderUrl(w) {
     return `https://polymarket.com/portfolio/${w.address}`;
 }
 
+async function togglePause(addr, paused) {
+    try {
+        const r = await fetch('/api/wallets/pause', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ wallet: addr, paused }),
+        });
+        const d = await r.json();
+        if (d.error) { console.error(d.error); return; }
+        emit('refresh');
+    } catch(e) { console.error('Failed to toggle pause', e); }
+}
+
+function pauseStatusTag(w) {
+    if (!w.is_paused) return { text: 'Active', cls: 'bg-green-900 text-green-400' };
+    if (w.pause_reason?.startsWith('auto:')) return { text: 'Paused (Auto)', cls: 'bg-red-800 text-red-300' };
+    return { text: 'Paused', cls: 'bg-orange-800 text-orange-300' };
+}
+
 function performanceTag(w) {
     if (w.total_trades === 0 && w.open_positions === 0) return { text: 'NO DATA', cls: 'bg-gray-700 text-gray-400' };
     if (w.combined_pnl > 0 && w.win_rate >= 55) return { text: 'STRONG', cls: 'bg-green-800 text-green-300' };
@@ -67,13 +87,14 @@ const columns = [
     { key: 'total_trades', label: 'Trades' },
     { key: 'open_positions', label: 'Open' },
     { key: 'total_invested', label: 'Invested' },
+    { key: 'is_paused', label: 'Status' },
 ];
 </script>
 
 <template>
     <div>
         <!-- Summary cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
                 <div class="text-lg font-bold text-gray-200">{{ wallets.length }}</div>
@@ -88,6 +109,12 @@ const columns = [
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Losing</div>
                 <div class="text-lg font-bold text-red-400">
                     {{ wallets.filter(w => w.combined_pnl < 0).length }}
+                </div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
+                <div class="text-lg font-bold text-orange-400">
+                    {{ wallets.filter(w => w.is_paused).length }}
                 </div>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
@@ -110,11 +137,12 @@ const columns = [
                     <th class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 whitespace-nowrap">
                         Rating
                     </th>
+                    <th class="px-3 py-2 border-b border-gray-700"></th>
                 </tr>
             </thead>
             <tbody>
                 <tr v-if="wallets.length === 0">
-                    <td colspan="9" class="text-gray-500 px-3 py-2">No tracked wallets</td>
+                    <td colspan="11" class="text-gray-500 px-3 py-2">No tracked wallets</td>
                 </tr>
                 <tr v-for="w in sorted" :key="w.address" class="hover:bg-gray-900">
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">
@@ -150,10 +178,26 @@ const columns = [
                         ${{ w.total_invested.toFixed(2) }}
                     </td>
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">
+                        <span :class="pauseStatusTag(w).cls"
+                              class="px-2 py-0.5 rounded text-xs font-semibold">
+                            {{ pauseStatusTag(w).text }}
+                        </span>
+                    </td>
+                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
                         <span :class="performanceTag(w).cls"
                               class="px-2 py-0.5 rounded text-xs font-semibold">
                             {{ performanceTag(w).text }}
                         </span>
+                    </td>
+                    <td class="px-3 py-2 border-b border-gray-800">
+                        <button v-if="!w.is_paused" @click="togglePause(w.address, true)"
+                                class="bg-orange-700 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded">
+                            Pause
+                        </button>
+                        <button v-else @click="togglePause(w.address, false)"
+                                class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded">
+                            Resume
+                        </button>
                     </td>
                 </tr>
             </tbody>

@@ -66,6 +66,29 @@ class WalletController extends Controller
     }
 
     /**
+     * Toggle pause/resume for a tracked wallet.
+     */
+    public function togglePause(Request $request): JsonResponse
+    {
+        $wallet = strtolower(trim($request->input('wallet', '')));
+
+        $record = TrackedWallet::where('address', $wallet)->first();
+        if (! $record) {
+            return response()->json(['error' => 'Wallet not found'], 400);
+        }
+
+        $paused = (bool) $request->input('paused', true);
+
+        $record->update([
+            'is_paused' => $paused,
+            'paused_at' => $paused ? now() : null,
+            'pause_reason' => $paused ? 'manual' : null,
+        ]);
+
+        return response()->json(['ok' => true, 'is_paused' => $paused]);
+    }
+
+    /**
      * Remove a tracked wallet.
      */
     public function destroy(Request $request): JsonResponse

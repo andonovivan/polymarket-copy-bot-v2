@@ -63,7 +63,7 @@ class TradeTracker
      */
     public function poll(): array
     {
-        $wallets = TrackedWallet::pluck('address')->all();
+        $wallets = TrackedWallet::where('is_paused', false)->pluck('address')->all();
         if (empty($wallets)) {
             return [];
         }

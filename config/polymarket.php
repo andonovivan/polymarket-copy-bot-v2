@@ -14,4 +14,9 @@ return [
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),
+
+    // Auto-pause thresholds — wallets are paused when ALL conditions are met.
+    'auto_pause_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_MIN_TRADES', 10),
+    'auto_pause_max_win_rate' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_WIN_RATE', 30),
+    'auto_pause_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_LOSS', -15),
 ];

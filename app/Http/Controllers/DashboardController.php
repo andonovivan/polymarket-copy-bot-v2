@@ -31,10 +31,13 @@ class DashboardController extends Controller
         $totalCost = 0.0;
         $openPositionCount = 0;
 
-        // Build a wallet lookup: address -> {name, profile_slug}
+        // Build a wallet lookup: address -> {name, profile_slug, pause info}
         $walletLookup = TrackedWallet::all()->keyBy('address')->map(fn ($w) => [
             'name' => $w->name,
             'profile_slug' => $w->profile_slug,
+            'is_paused' => (bool) $w->is_paused,
+            'paused_at' => $w->paused_at?->timestamp,
+            'pause_reason' => $w->pause_reason,
         ])->all();
 
         // Compute summary stats from all open positions (lightweight — no serialization).
@@ -75,6 +78,9 @@ class DashboardController extends Controller
                 'address' => $addr,
                 'name' => $info['name'],
                 'profile_slug' => $info['profile_slug'],
+                'is_paused' => $info['is_paused'],
+                'paused_at' => $info['paused_at'],
+                'pause_reason' => $info['pause_reason'],
                 'realized_pnl' => 0.0,
                 'unrealized_pnl' => 0.0,
                 'total_trades' => 0,
@@ -147,6 +153,9 @@ class DashboardController extends Controller
                 'address' => $w->address,
                 'name' => $w->name,
                 'profile_slug' => $w->profile_slug,
+                'is_paused' => (bool) $w->is_paused,
+                'paused_at' => $w->paused_at?->timestamp,
+                'pause_reason' => $w->pause_reason,
             ])->all(),
             'ts' => time(),
         ]);

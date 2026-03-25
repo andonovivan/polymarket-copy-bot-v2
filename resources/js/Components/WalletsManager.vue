@@ -98,6 +98,32 @@ async function saveEdit(addr) {
     } catch(e) { showMsg('Failed to update', true); }
 }
 
+async function togglePause(addr, paused) {
+    try {
+        const r = await fetch('/api/wallets/pause', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ wallet: addr, paused }),
+        });
+        const d = await r.json();
+        if (d.error) { showMsg(d.error, true); return; }
+        showMsg(paused ? 'Paused ' + addr.slice(0, 8) + '...' : 'Resumed ' + addr.slice(0, 8) + '...', false);
+        emit('refresh');
+    } catch(e) { showMsg('Failed to toggle pause', true); }
+}
+
+function pauseLabel(w) {
+    if (!w.is_paused) return null;
+    if (w.pause_reason?.startsWith('auto:')) return 'Auto-Paused';
+    return 'Paused';
+}
+
+function pauseBadgeClass(w) {
+    if (!w.is_paused) return '';
+    if (w.pause_reason?.startsWith('auto:')) return 'bg-red-800 text-red-300';
+    return 'bg-orange-800 text-orange-300';
+}
+
 function profileUrl(w) {
     if (w.profile_slug) return `https://polymarket.com/@${w.profile_slug}`;
     return `https://polymarket.com/portfolio/${w.address}`;
@@ -151,6 +177,10 @@ function profileUrl(w) {
                                class="text-blue-400 hover:text-blue-300 hover:underline text-sm font-medium">
                                 {{ w.name || 'Unnamed' }}
                             </a>
+                            <span v-if="w.is_paused" :class="pauseBadgeClass(w)"
+                                  class="px-2 py-0.5 rounded text-xs font-semibold">
+                                {{ pauseLabel(w) }}
+                            </span>
                         </div>
                         <div class="font-mono text-xs text-gray-500 mt-1 overflow-hidden text-ellipsis">{{ w.address }}</div>
                         <div v-if="w.profile_slug" class="text-xs text-gray-600 mt-0.5">
@@ -158,6 +188,14 @@ function profileUrl(w) {
                         </div>
                     </div>
                     <div class="flex gap-2 ml-3 shrink-0">
+                        <button v-if="!w.is_paused" @click="togglePause(w.address, true)"
+                                class="bg-orange-700 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded">
+                            Pause
+                        </button>
+                        <button v-else @click="togglePause(w.address, false)"
+                                class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded">
+                            Resume
+                        </button>
                         <button @click="startEdit(w)"
                                 class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded">
                             Edit
