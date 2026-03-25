@@ -1,32 +1,68 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 
-const props = defineProps({ wallets: Array });
+const props = defineProps({
+    refreshTrigger: { type: Number, default: 0 },
+});
 const emit = defineEmits(['refresh']);
 
+const PAGE_SIZE = 10;
+const page = ref(1);
 const sortKey = ref('combined_pnl');
-const sortAsc = ref(false);
+const sortOrder = ref('desc');
+const rows = ref([]);
+const total = ref(0);
+const lastPage = ref(1);
+const loading = ref(false);
 
-const sorted = computed(() => {
-    const items = [...props.wallets];
-    items.sort((a, b) => {
-        let va = a[sortKey.value], vb = b[sortKey.value];
-        if (va === null || va === undefined) va = -Infinity;
-        if (vb === null || vb === undefined) vb = -Infinity;
-        if (typeof va === 'string') return sortAsc.value ? va.localeCompare(vb) : vb.localeCompare(va);
-        return sortAsc.value ? va - vb : vb - va;
-    });
-    return items;
-});
+async function fetchData() {
+    loading.value = true;
+    try {
+        const params = new URLSearchParams({
+            page: page.value,
+            per_page: PAGE_SIZE,
+            sort: sortKey.value,
+            order: sortOrder.value,
+        });
+        const r = await fetch(`/api/wallet-report?${params}`);
+        const d = await r.json();
+        rows.value = d.data;
+        total.value = d.total;
+        lastPage.value = d.last_page;
+        if (page.value > d.last_page && d.last_page > 0) {
+            page.value = d.last_page;
+            await fetchData();
+        }
+    } catch (e) {
+        console.error('Failed to fetch wallet report', e);
+    } finally {
+        loading.value = false;
+    }
+}
+
+onMounted(fetchData);
+
+watch(() => props.refreshTrigger, fetchData);
 
 function setSort(key) {
-    if (sortKey.value === key) { sortAsc.value = !sortAsc.value; }
-    else { sortKey.value = key; sortAsc.value = true; }
+    if (sortKey.value === key) {
+        sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortKey.value = key;
+        sortOrder.value = 'desc';
+    }
+    page.value = 1;
+    fetchData();
+}
+
+function goPage(p) {
+    page.value = p;
+    fetchData();
 }
 
 function arrow(key) {
     if (sortKey.value !== key) return '';
-    return sortAsc.value ? '▲' : '▼';
+    return sortOrder.value === 'asc' ? '\u25B2' : '\u25BC';
 }
 
 function fmtUsd(v) {
@@ -62,6 +98,7 @@ async function togglePause(addr, paused) {
         const d = await r.json();
         if (d.error) { console.error(d.error); return; }
         emit('refresh');
+        fetchData();
     } catch(e) { console.error('Failed to toggle pause', e); }
 }
 
@@ -99,30 +136,30 @@ const columns = [
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
-                <div class="text-lg font-bold text-gray-200">{{ wallets.length }}</div>
+                <div class="text-lg font-bold text-gray-200">{{ total }}</div>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Profitable</div>
                 <div class="text-lg font-bold text-green-400">
-                    {{ wallets.filter(w => w.combined_pnl > 0).length }}
+                    {{ rows.filter(w => w.combined_pnl > 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
                 </div>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Losing</div>
                 <div class="text-lg font-bold text-red-400">
-                    {{ wallets.filter(w => w.combined_pnl < 0).length }}
+                    {{ rows.filter(w => w.combined_pnl < 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
                 </div>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded p-3">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
                 <div class="text-lg font-bold text-orange-400">
-                    {{ wallets.filter(w => w.is_paused).length }}
+                    {{ rows.filter(w => w.is_paused).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
                 </div>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
-                <div class="text-lg font-bold truncate" :class="pnlClass(sorted.length ? sorted[sortKey === 'combined_pnl' && !sortAsc ? 0 : sorted.length - 1]?.combined_pnl : 0)">
-                    {{ wallets.length ? traderLabel(wallets.reduce((best, w) => w.combined_pnl > best.combined_pnl ? w : best, wallets[0])) : '-' }}
+                <div class="text-lg font-bold truncate" :class="pnlClass(rows.length ? rows[0]?.combined_pnl : 0)">
+                    {{ rows.length && sortKey === 'combined_pnl' && sortOrder === 'desc' ? traderLabel(rows[0]) : '-' }}
                 </div>
             </div>
         </div>
@@ -143,10 +180,10 @@ const columns = [
                 </tr>
             </thead>
             <tbody>
-                <tr v-if="wallets.length === 0">
+                <tr v-if="rows.length === 0">
                     <td colspan="11" class="text-gray-500 px-3 py-2">No tracked wallets</td>
                 </tr>
-                <tr v-for="w in sorted" :key="w.address" class="hover:bg-gray-900">
+                <tr v-for="w in rows" :key="w.address" class="hover:bg-gray-900">
                     <td class="px-3 py-2 border-b border-gray-800 text-sm">
                         <a :href="traderUrl(w)" target="_blank"
                            class="text-blue-400 hover:text-blue-300 hover:underline">
@@ -204,5 +241,16 @@ const columns = [
                 </tr>
             </tbody>
         </table>
+        <div v-if="total > PAGE_SIZE" class="flex items-center gap-2 mt-2">
+            <button @click="goPage(Math.max(1, page - 1))" :disabled="page <= 1"
+                    class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
+                &larr; Prev
+            </button>
+            <span class="text-gray-500 text-xs">{{ page }} / {{ lastPage }} ({{ total }} rows)</span>
+            <button @click="goPage(Math.min(lastPage, page + 1))" :disabled="page >= lastPage"
+                    class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
+                Next &rarr;
+            </button>
+        </div>
     </div>
 </template>

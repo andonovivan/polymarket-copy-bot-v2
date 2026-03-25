@@ -51,7 +51,8 @@ npm run build                    # Build frontend assets
 
 ### Controllers (`app/Http/Controllers/`)
 
-- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns summary stats, wallet report, and balance info from DB (no positions/trades arrays — those use separate paginated endpoints).
+- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns summary stats and balance info from DB (no positions/trades/wallet-report arrays — those use separate paginated endpoints).
+- **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report (server-side sort/pagination). Aggregates realized P&L from trade history and unrealized from open positions.
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
 - **WalletController** - CRUD for tracked wallets: `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
@@ -77,7 +78,7 @@ npm run build                    # Build frontend assets
 - **PositionsTable.vue** - Server-side paginated, sortable table of open positions. Fetches from `GET /api/positions` with page/sort/order params. Includes Close button and trader profile links.
 - **TradeHistoryTable.vue** - Server-side paginated, sortable table of closed trades. Fetches from `GET /api/trades` with page/sort/order params.
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause.
-- **WalletReport.vue** - Per-wallet performance report with combined/realized/unrealized P&L, win rate, trade counts, performance rating badges, pause status (Active/Paused/Paused Auto) and Pause/Resume action buttons. Summary cards include paused wallet count.
+- **WalletReport.vue** - Server-side paginated, sortable per-wallet performance report. Fetches from `GET /api/wallet-report` with page/sort/order params. Shows combined/realized/unrealized P&L, win rate, trade counts, performance rating badges, pause status and Pause/Resume action buttons. Summary cards include paused wallet count.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
 
 ### Configuration (`config/polymarket.php`)
@@ -148,7 +149,7 @@ All trading parameters are configurable via `.env`:
 ## Key Design Decisions
 
 - **Dashboard reads from DB only** - Prices are cached in the `positions` table by `bot:update-prices`. All API endpoints make zero external API calls, keeping response times ~20ms.
-- **Server-side pagination** - Positions and trades tables use separate paginated API endpoints (`/api/positions`, `/api/trades`) with server-side sorting (SQL ORDER BY) and pagination (LIMIT/OFFSET). Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
+- **Server-side pagination** - Positions, trades, and wallet report tables use separate paginated API endpoints (`/api/positions`, `/api/trades`, `/api/wallet-report`) with server-side sorting and pagination. Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
 - **Trading balance limit** - User-configurable limit stored in `BotMeta`. When total invested + trade amount exceeds limit, BUY trades are skipped. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
@@ -176,6 +177,7 @@ app/
     DashboardController.php  # Dashboard page + /api/data (summary stats only)
     DiscoverController.php   # GET/POST /api/discover - leaderboard discovery
     PositionController.php   # GET /api/positions (paginated) + POST /api/close
+    WalletReportController.php # GET /api/wallet-report (paginated)
     TradeHistoryController.php # GET /api/trades (paginated)
     WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
   Models/

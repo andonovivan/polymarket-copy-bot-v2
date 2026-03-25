@@ -96,7 +96,7 @@ function fmtTime(ts) {
             <!-- Report Tab -->
             <div v-show="activeTab === 'report'">
                 <h2 class="text-blue-400 text-base mb-3">Wallet Performance Report</h2>
-                <WalletReport v-if="data" :wallets="data.wallet_report || []" @refresh="refresh" />
+                <WalletReport :refreshTrigger="refreshTrigger" @refresh="refresh" />
             </div>
 
             <!-- Discover Tab -->

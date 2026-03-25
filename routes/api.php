@@ -6,6 +6,7 @@ use App\Http\Controllers\DiscoverController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\TradeHistoryController;
 use App\Http\Controllers\WalletController;
+use App\Http\Controllers\WalletReportController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/data', [DashboardController::class, 'data']);
@@ -17,5 +18,6 @@ Route::patch('/wallets/pause', [WalletController::class, 'togglePause']);
 Route::delete('/wallets', [WalletController::class, 'destroy']);
 Route::post('/close', [PositionController::class, 'close']);
 Route::put('/balance', [BalanceController::class, 'update']);
+Route::get('/wallet-report', [WalletReportController::class, 'index']);
 Route::get('/discover', [DiscoverController::class, 'index']);
 Route::post('/discover', [DiscoverController::class, 'store']);
