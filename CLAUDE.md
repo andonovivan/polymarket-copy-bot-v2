@@ -53,10 +53,11 @@ npm run build                    # Build frontend assets
 
 - **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns lightweight summary stats and balance info from DB using SQL aggregates (no positions/trades/wallets/wallet-report arrays — those use separate endpoints).
 - **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report (server-side sort/pagination). `GET /api/wallet-report/summary` returns aggregate totals (profitable/losing/paused counts, best performer) across all wallets — fetched separately from table data. Uses SQL GROUP BY aggregation for realized P&L from trade history and unrealized from open positions (no full table loads).
-- **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
+- **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint. `POST /api/close-all` closes all open positions at current midpoints.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
 - **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
+- **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
 
 ### Models (`app/Models/`)
@@ -72,7 +73,7 @@ npm run build                    # Build frontend assets
 
 ### Vue Frontend (`resources/js/`)
 
-- **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data.
+- **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data. Global "Pause Bot" and "Close All" buttons in the header, visible on all tabs.
 - **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount (Polymarket-style: limit - invested + realized P&L), and usage progress bar.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
 - **DataTable.vue** - Generic server-side paginated, sortable table component. Handles fetch, sort, pagination, per-page size selector (10/25/50/100), loading spinner, and empty state. Exposes scoped slots (`#cell-{key}`, `#row-actions`, `#above-table`, `#extra-headers`) for custom cell rendering. Used by PositionsTable, TradeHistoryTable, and WalletReport.
@@ -139,14 +140,15 @@ All trading parameters are configurable via `.env`:
 
 ### Trade Copy Pipeline
 
-1. Detect new trade from active (non-paused) tracked wallet
-2. Filter: skip sells if disabled, skip zero price
-3. Calculate size: `$2 / trade_price` for buys, all held shares for sells
-4. Price sanity: skip if midpoint deviates > 3 cents from trade price
-5. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
-6. Exposure cap: skip if would exceed $100 per market
-7. Place order via CLOB API (or log in dry-run mode)
-8. Update position with weighted-average buy price, save to DB
+1. Check global pause — skip all if bot is paused
+2. Detect new trade from active (non-paused) tracked wallet
+3. Filter: skip sells if disabled, skip zero price
+4. Calculate size: `$2 / trade_price` for buys, all held shares for sells
+5. Price sanity: skip if midpoint deviates > 3 cents from trade price
+6. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
+7. Exposure cap: skip if would exceed $100 per market
+8. Place order via CLOB API (or log in dry-run mode)
+9. Update position with weighted-average buy price, save to DB
 
 ## Key Design Decisions
 
@@ -160,6 +162,7 @@ All trading parameters are configurable via `.env`:
 - **Market resolution handling** - Resolved markets (no orderbook) are detected and closed with correct payout ($1 for winners, $0 for losers, partial for voided).
 - **Wallet pause/stop** - Wallets can be manually paused from the UI or auto-paused by `bot:check-wallets` based on configurable performance thresholds. Paused wallets stop being polled for new trades but existing positions remain open and manageable. Auto-paused wallets show a distinct red "Paused (Auto)" badge vs orange "Paused" for manual. Resuming is always manual via UI.
 - **Wallet discovery** - Top traders auto-discovered hourly from the Polymarket leaderboard API (Data API `/v1/leaderboard`). Filters by PNL and volume thresholds. Max 3 auto-adds per run to prevent flooding. Manual discovery via the Discover tab allows scanning with custom time period/category and one-click adding.
+- **Global pause & close all** - "Pause Bot" button in the header sets `BotMeta::global_paused`. Both `TradeTracker::poll()` and `TradeCopier::copy()` check this flag and skip all work when paused. Pulsing red "BOT PAUSED" badge shown in header. "Close All" button sells every open position at current midpoint with a confirmation dialog. Both buttons are always visible regardless of active tab.
 - **Performance optimizations** - Database indexes on `copied_from_wallet` (positions + trade_history), `opened_at`/`closed_at` (trade_history), and `market_status` (positions). All aggregation uses SQL `GROUP BY` / `SUM` / `COUNT` instead of loading full tables into PHP. `TradeTracker` polls wallets concurrently via `Http::pool` and batch-checks/inserts SeenTrade records (chunked at 500). `SeenTrade::prune` uses a cutoff-ID delete instead of loading excess IDs into memory.
 
 ## File Structure
@@ -180,7 +183,8 @@ app/
     BalanceController.php    # PUT /api/balance - trading balance limit
     DashboardController.php  # Dashboard page + /api/data (summary stats only)
     DiscoverController.php   # GET/POST /api/discover - leaderboard discovery
-    PositionController.php   # GET /api/positions (paginated) + POST /api/close
+    GlobalPauseController.php # POST /api/global-pause - toggle bot pause
+    PositionController.php   # GET /api/positions (paginated) + POST /api/close + POST /api/close-all
     WalletReportController.php # GET /api/wallet-report (paginated)
     TradeHistoryController.php # GET /api/trades (paginated)
     WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
