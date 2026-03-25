@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue';
+import Pagination from './Pagination.vue';
 
 const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
@@ -197,16 +198,6 @@ const columns = [
                 </tr>
             </tbody>
         </table>
-        <div v-if="total > PAGE_SIZE" class="flex items-center gap-2 mt-2">
-            <button @click="goPage(Math.max(1, page - 1))" :disabled="page <= 1"
-                    class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
-                &larr; Prev
-            </button>
-            <span class="text-gray-500 text-xs">{{ page }} / {{ lastPage }} ({{ total }} rows)</span>
-            <button @click="goPage(Math.min(lastPage, page + 1))" :disabled="page >= lastPage"
-                    class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
-                Next &rarr;
-            </button>
-        </div>
+        <Pagination :page="page" :lastPage="lastPage" :total="total" :pageSize="PAGE_SIZE" @go="goPage" />
     </div>
 </template>

@@ -201,6 +201,7 @@ resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
   Components/
     BalanceBar.vue           # Balance management (Polymarket + trading limit)
+    Pagination.vue           # Shared pagination (First/Prev/Next/Last) used by all tables
     StatsCards.vue            # P&L stat cards
     PositionsTable.vue       # Server-side paginated open positions
     TradeHistoryTable.vue    # Server-side paginated closed trades

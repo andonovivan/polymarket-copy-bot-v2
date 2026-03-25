@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
+import Pagination from './Pagination.vue';
 
 const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
@@ -266,17 +267,7 @@ function profileUrl(w) {
             </ul>
             <p v-else class="text-gray-500 py-3">No wallets tracked. Add one above.</p>
 
-            <div v-if="wallets.length > PAGE_SIZE" class="flex items-center gap-2 mt-2">
-                <button @click="page = Math.max(0, page - 1)" :disabled="page <= 0"
-                        class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
-                    &larr; Prev
-                </button>
-                <span class="text-gray-500 text-xs">{{ page + 1 }} / {{ totalPages }} ({{ wallets.length }} wallets)</span>
-                <button @click="page = Math.min(totalPages - 1, page + 1)" :disabled="page >= totalPages - 1"
-                        class="bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1 rounded text-xs disabled:opacity-40">
-                    Next &rarr;
-                </button>
-            </div>
+            <Pagination :page="page + 1" :lastPage="totalPages" :total="wallets.length" :pageSize="PAGE_SIZE" label="wallets" @go="p => page = p - 1" />
         </template>
     </div>
 </template>
