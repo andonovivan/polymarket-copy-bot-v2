@@ -75,10 +75,12 @@ npm run build                    # Build frontend assets
 - **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data.
 - **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount, and usage progress bar.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
-- **PositionsTable.vue** - Server-side paginated, sortable table of open positions. Fetches from `GET /api/positions` with page/sort/order params. Includes Close button and trader profile links.
-- **TradeHistoryTable.vue** - Server-side paginated, sortable table of closed trades. Fetches from `GET /api/trades` with page/sort/order params.
-- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`.
-- **WalletReport.vue** - Server-side paginated, sortable per-wallet performance report. Fetches from `GET /api/wallet-report` with page/sort/order params. Shows combined/realized/unrealized P&L, win rate, trade counts, performance rating badges, pause status and Pause/Resume action buttons. Summary cards include paused wallet count.
+- **DataTable.vue** - Generic server-side paginated, sortable table component. Handles fetch, sort, pagination, per-page size selector (10/25/50/100), loading spinner, and empty state. Exposes scoped slots (`#cell-{key}`, `#row-actions`, `#above-table`, `#extra-headers`) for custom cell rendering. Used by PositionsTable, TradeHistoryTable, and WalletReport.
+- **Pagination.vue** - Shared pagination (First/Prev/Next/Last) with per-page size dropdown. Used by all tables including WalletsManager.
+- **PositionsTable.vue** - Uses DataTable with `apiUrl="/api/positions"`. Custom slots for Close button, status badges, null price handling, and trader profile links.
+- **TradeHistoryTable.vue** - Uses DataTable with `apiUrl="/api/trades"`. Minimal custom slots (trader link, P&L coloring).
+- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
+- **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Custom slots for summary cards (`#above-table`), rating/status badges, Pause/Resume buttons, and win rate coloring.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
 
 ### Configuration (`config/polymarket.php`)
@@ -201,13 +203,16 @@ resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
   Components/
     BalanceBar.vue           # Balance management (Polymarket + trading limit)
-    Pagination.vue           # Shared pagination (First/Prev/Next/Last) used by all tables
+    DataTable.vue            # Generic server-side paginated/sortable table with slots
+    Pagination.vue           # Shared pagination + per-page selector (10/25/50/100)
     StatsCards.vue            # P&L stat cards
-    PositionsTable.vue       # Server-side paginated open positions
-    TradeHistoryTable.vue    # Server-side paginated closed trades
+    PositionsTable.vue       # Open positions (uses DataTable)
+    TradeHistoryTable.vue    # Closed trades (uses DataTable)
     WalletDiscovery.vue      # Leaderboard discovery + add wallets
-    WalletsManager.vue       # Wallet CRUD UI
-    WalletReport.vue         # Per-wallet performance report
+    WalletsManager.vue       # Wallet CRUD UI (client-side pagination)
+    WalletReport.vue         # Per-wallet performance report (uses DataTable)
+  utils/
+    formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl
 routes/
   api.php                    # API endpoints
   console.php                # Scheduled tasks

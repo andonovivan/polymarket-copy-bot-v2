@@ -7,7 +7,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['refresh']);
 
-const PAGE_SIZE = 10;
+const perPage = ref(10);
 const page = ref(0);
 const walletInput = ref('');
 const nameInput = ref('');
@@ -21,9 +21,14 @@ const wallets = ref([]);
 const loading = ref(true);
 let msgTimeout = null;
 
-const paged = computed(() => wallets.value.slice(page.value * PAGE_SIZE, (page.value + 1) * PAGE_SIZE));
-const totalPages = computed(() => Math.max(1, Math.ceil(wallets.value.length / PAGE_SIZE)));
-const offset = computed(() => page.value * PAGE_SIZE);
+const paged = computed(() => wallets.value.slice(page.value * perPage.value, (page.value + 1) * perPage.value));
+const totalPages = computed(() => Math.max(1, Math.ceil(wallets.value.length / perPage.value)));
+const offset = computed(() => page.value * perPage.value);
+
+function changePerPage(size) {
+    perPage.value = size;
+    page.value = 0;
+}
 
 async function fetchWallets() {
     try {
@@ -267,7 +272,7 @@ function profileUrl(w) {
             </ul>
             <p v-else class="text-gray-500 py-3">No wallets tracked. Add one above.</p>
 
-            <Pagination :page="page + 1" :lastPage="totalPages" :total="wallets.length" :pageSize="PAGE_SIZE" label="wallets" @go="p => page = p - 1" />
+            <Pagination :page="page + 1" :lastPage="totalPages" :total="wallets.length" :pageSize="perPage" label="wallets" @go="p => page = p - 1" @update:perPage="changePerPage" />
         </template>
     </div>
 </template>

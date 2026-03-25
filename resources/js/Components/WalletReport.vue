@@ -1,106 +1,39 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
-import Pagination from './Pagination.vue';
+import { ref } from 'vue';
+import DataTable from './DataTable.vue';
+import { fmtUsd, pnlClass, traderLabel, traderUrl } from '../utils/formatters.js';
 
+const emit = defineEmits(['refresh']);
 const props = defineProps({
     refreshTrigger: { type: Number, default: 0 },
 });
-const emit = defineEmits(['refresh']);
 
-const PAGE_SIZE = 10;
-const page = ref(1);
-const sortKey = ref('combined_pnl');
-const sortOrder = ref('desc');
-const rows = ref([]);
-const total = ref(0);
-const lastPage = ref(1);
-const loading = ref(false);
+const tableRef = ref(null);
 
-async function fetchData() {
-    loading.value = true;
-    try {
-        const params = new URLSearchParams({
-            page: page.value,
-            per_page: PAGE_SIZE,
-            sort: sortKey.value,
-            order: sortOrder.value,
-        });
-        const r = await fetch(`/api/wallet-report?${params}`);
-        const d = await r.json();
-        rows.value = d.data;
-        total.value = d.total;
-        lastPage.value = d.last_page;
-        if (page.value > d.last_page && d.last_page > 0) {
-            page.value = d.last_page;
-            await fetchData();
-        }
-    } catch (e) {
-        console.error('Failed to fetch wallet report', e);
-    } finally {
-        loading.value = false;
-    }
-}
-
-onMounted(fetchData);
-
-watch(() => props.refreshTrigger, fetchData);
-
-function setSort(key) {
-    if (sortKey.value === key) {
-        sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
-    } else {
-        sortKey.value = key;
-        sortOrder.value = 'desc';
-    }
-    page.value = 1;
-    fetchData();
-}
-
-function goPage(p) {
-    page.value = p;
-    fetchData();
-}
-
-function arrow(key) {
-    if (sortKey.value !== key) return '';
-    return sortOrder.value === 'asc' ? '\u25B2' : '\u25BC';
-}
-
-function fmtUsd(v) {
-    if (v === null || v === undefined) return '-';
-    const abs = Math.abs(v).toFixed(2);
-    return v >= 0 ? `+$${abs}` : `-$${abs}`;
-}
-
-function pnlClass(v) {
-    if (v > 0) return 'text-green-400';
-    if (v < 0) return 'text-red-400';
-    return 'text-gray-300';
-}
-
-function traderLabel(w) {
-    const name = w.name || '';
-    if (!name || name.startsWith('0x') || name.length > 20) return w.address.slice(0, 8) + '...';
-    return name;
-}
-
-function traderUrl(w) {
-    if (w.profile_slug) return `https://polymarket.com/@${w.profile_slug}`;
-    return `https://polymarket.com/portfolio/${w.address}`;
-}
+const columns = [
+    { key: 'name', label: 'Trader' },
+    { key: 'combined_pnl', label: 'Combined P&L' },
+    { key: 'realized_pnl', label: 'Realized' },
+    { key: 'unrealized_pnl', label: 'Unrealized' },
+    { key: 'win_rate', label: 'Win Rate' },
+    { key: 'total_trades', label: 'Trades' },
+    { key: 'open_positions', label: 'Open' },
+    { key: 'total_invested', label: 'Invested' },
+    { key: 'is_paused', label: 'Status' },
+];
 
 async function togglePause(addr, paused) {
     try {
         const r = await fetch('/api/wallets/pause', {
             method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ wallet: addr, paused }),
         });
         const d = await r.json();
         if (d.error) { console.error(d.error); return; }
         emit('refresh');
-        fetchData();
-    } catch(e) { console.error('Failed to toggle pause', e); }
+        tableRef.value?.fetchData();
+    } catch (e) { console.error('Failed to toggle pause', e); }
 }
 
 function pauseStatusTag(w) {
@@ -117,142 +50,118 @@ function performanceTag(w) {
     if (w.combined_pnl > -2) return { text: 'WEAK', cls: 'bg-yellow-900 text-yellow-300' };
     return { text: 'POOR', cls: 'bg-red-900 text-red-300' };
 }
-
-const columns = [
-    { key: 'name', label: 'Trader' },
-    { key: 'combined_pnl', label: 'Combined P&L' },
-    { key: 'realized_pnl', label: 'Realized' },
-    { key: 'unrealized_pnl', label: 'Unrealized' },
-    { key: 'win_rate', label: 'Win Rate' },
-    { key: 'total_trades', label: 'Trades' },
-    { key: 'open_positions', label: 'Open' },
-    { key: 'total_invested', label: 'Invested' },
-    { key: 'is_paused', label: 'Status' },
-];
 </script>
 
 <template>
-    <div>
-        <!-- Loading spinner (initial load only) -->
-        <div v-if="loading && rows.length === 0" class="flex items-center justify-center py-8">
-            <svg class="animate-spin h-6 w-6 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-            <span class="ml-2 text-gray-500 text-sm">Loading report...</span>
-        </div>
+    <DataTable ref="tableRef" apiUrl="/api/wallet-report" :columns="columns"
+               defaultSort="combined_pnl" defaultOrder="desc" rowKey="address"
+               emptyMessage="No tracked wallets" loadingMessage="Loading report..."
+               :refreshTrigger="refreshTrigger" @refresh="emit('refresh')">
 
-        <template v-else>
-        <!-- Summary cards -->
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-            <div class="bg-gray-900 border border-gray-800 rounded p-3">
-                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
-                <div class="text-lg font-bold text-gray-200">{{ total }}</div>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded p-3">
-                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Profitable</div>
-                <div class="text-lg font-bold text-green-400">
-                    {{ rows.filter(w => w.combined_pnl > 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
+        <template #above-table="{ rows, total, lastPage, sortKey, sortOrder }">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+                <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
+                    <div class="text-lg font-bold text-gray-200">{{ total }}</div>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Profitable</div>
+                    <div class="text-lg font-bold text-green-400">
+                        {{ rows.filter(w => w.combined_pnl > 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
+                    </div>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Losing</div>
+                    <div class="text-lg font-bold text-red-400">
+                        {{ rows.filter(w => w.combined_pnl < 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
+                    </div>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
+                    <div class="text-lg font-bold text-orange-400">
+                        {{ rows.filter(w => w.is_paused).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
+                    </div>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
+                    <div class="text-lg font-bold truncate" :class="pnlClass(rows.length ? rows[0]?.combined_pnl : 0)">
+                        {{ rows.length && sortKey === 'combined_pnl' && sortOrder === 'desc' ? traderLabel(rows[0]) : '-' }}
+                    </div>
                 </div>
             </div>
-            <div class="bg-gray-900 border border-gray-800 rounded p-3">
-                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Losing</div>
-                <div class="text-lg font-bold text-red-400">
-                    {{ rows.filter(w => w.combined_pnl < 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
-                </div>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded p-3">
-                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
-                <div class="text-lg font-bold text-orange-400">
-                    {{ rows.filter(w => w.is_paused).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
-                </div>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
-                <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
-                <div class="text-lg font-bold truncate" :class="pnlClass(rows.length ? rows[0]?.combined_pnl : 0)">
-                    {{ rows.length && sortKey === 'combined_pnl' && sortOrder === 'desc' ? traderLabel(rows[0]) : '-' }}
-                </div>
-            </div>
-        </div>
-
-        <!-- Table -->
-        <table class="w-full mb-2">
-            <thead>
-                <tr>
-                    <th v-for="col in columns" :key="col.key"
-                        @click="setSort(col.key)"
-                        class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 cursor-pointer hover:text-gray-300 select-none whitespace-nowrap">
-                        {{ col.label }} <span class="text-[0.6em] ml-1">{{ arrow(col.key) }}</span>
-                    </th>
-                    <th class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 whitespace-nowrap">
-                        Rating
-                    </th>
-                    <th class="px-3 py-2 border-b border-gray-700"></th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr v-if="rows.length === 0">
-                    <td colspan="11" class="text-gray-500 px-3 py-2">No tracked wallets</td>
-                </tr>
-                <tr v-for="w in rows" :key="w.address" class="hover:bg-gray-900">
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
-                        <a :href="traderUrl(w)" target="_blank"
-                           class="text-blue-400 hover:text-blue-300 hover:underline">
-                            {{ traderLabel(w) }}
-                        </a>
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm font-semibold" :class="pnlClass(w.combined_pnl)">
-                        {{ fmtUsd(w.combined_pnl) }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm" :class="pnlClass(w.realized_pnl)">
-                        {{ fmtUsd(w.realized_pnl) }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm" :class="pnlClass(w.unrealized_pnl)">
-                        {{ fmtUsd(w.unrealized_pnl) }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
-                        <span :class="w.win_rate >= 55 ? 'text-green-400' : w.win_rate >= 45 ? 'text-gray-300' : 'text-red-400'">
-                            {{ w.total_trades > 0 ? w.win_rate + '%' : '-' }}
-                        </span>
-                        <span class="text-gray-600 text-xs ml-1" v-if="w.total_trades > 0">
-                            ({{ w.winning_trades }}W / {{ w.losing_trades }}L)
-                        </span>
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm text-gray-300">
-                        {{ w.total_trades }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm text-gray-300">
-                        {{ w.open_positions }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm text-gray-300">
-                        ${{ w.total_invested.toFixed(2) }}
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
-                        <span :class="pauseStatusTag(w).cls"
-                              class="px-2 py-0.5 rounded text-xs font-semibold">
-                            {{ pauseStatusTag(w).text }}
-                        </span>
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800 text-sm">
-                        <span :class="performanceTag(w).cls"
-                              class="px-2 py-0.5 rounded text-xs font-semibold">
-                            {{ performanceTag(w).text }}
-                        </span>
-                    </td>
-                    <td class="px-3 py-2 border-b border-gray-800">
-                        <button v-if="!w.is_paused" @click="togglePause(w.address, true)"
-                                class="bg-orange-700 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded">
-                            Pause
-                        </button>
-                        <button v-else @click="togglePause(w.address, false)"
-                                class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded">
-                            Resume
-                        </button>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        <Pagination :page="page" :lastPage="lastPage" :total="total" :pageSize="PAGE_SIZE" @go="goPage" />
         </template>
-    </div>
+
+        <template #cell-name="{ row }">
+            <a :href="traderUrl(row)" target="_blank"
+               class="text-blue-400 hover:text-blue-300 hover:underline">
+                {{ traderLabel(row) }}
+            </a>
+        </template>
+
+        <template #cell-combined_pnl="{ row }">
+            <span class="font-semibold" :class="pnlClass(row.combined_pnl)">{{ fmtUsd(row.combined_pnl) }}</span>
+        </template>
+
+        <template #cell-realized_pnl="{ row }">
+            <span :class="pnlClass(row.realized_pnl)">{{ fmtUsd(row.realized_pnl) }}</span>
+        </template>
+
+        <template #cell-unrealized_pnl="{ row }">
+            <span :class="pnlClass(row.unrealized_pnl)">{{ fmtUsd(row.unrealized_pnl) }}</span>
+        </template>
+
+        <template #cell-win_rate="{ row }">
+            <span :class="row.win_rate >= 55 ? 'text-green-400' : row.win_rate >= 45 ? 'text-gray-300' : 'text-red-400'">
+                {{ row.total_trades > 0 ? row.win_rate + '%' : '-' }}
+            </span>
+            <span class="text-gray-600 text-xs ml-1" v-if="row.total_trades > 0">
+                ({{ row.winning_trades }}W / {{ row.losing_trades }}L)
+            </span>
+        </template>
+
+        <template #cell-total_trades="{ value }">
+            <span class="text-gray-300">{{ value }}</span>
+        </template>
+
+        <template #cell-open_positions="{ value }">
+            <span class="text-gray-300">{{ value }}</span>
+        </template>
+
+        <template #cell-total_invested="{ row }">
+            <span class="text-gray-300">${{ row.total_invested.toFixed(2) }}</span>
+        </template>
+
+        <template #cell-is_paused="{ row }">
+            <span :class="pauseStatusTag(row).cls"
+                  class="px-2 py-0.5 rounded text-xs font-semibold">
+                {{ pauseStatusTag(row).text }}
+            </span>
+        </template>
+
+        <template #extra-headers>
+            <th class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 whitespace-nowrap">
+                Rating
+            </th>
+            <th class="px-3 py-2 border-b border-gray-700"></th>
+        </template>
+
+        <template #row-actions="{ row }">
+            <td class="px-3 py-2 border-b border-gray-800 text-sm">
+                <span :class="performanceTag(row).cls"
+                      class="px-2 py-0.5 rounded text-xs font-semibold">
+                    {{ performanceTag(row).text }}
+                </span>
+            </td>
+            <td class="px-3 py-2 border-b border-gray-800">
+                <button v-if="!row.is_paused" @click="togglePause(row.address, true)"
+                        class="bg-orange-700 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded">
+                    Pause
+                </button>
+                <button v-else @click="togglePause(row.address, false)"
+                        class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded">
+                    Resume
+                </button>
+            </td>
+        </template>
+    </DataTable>
 </template>
