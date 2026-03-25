@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import BalanceBar from '../Components/BalanceBar.vue';
 import StatsCards from '../Components/StatsCards.vue';
 import PositionsTable from '../Components/PositionsTable.vue';
@@ -11,14 +11,18 @@ import WalletDiscovery from '../Components/WalletDiscovery.vue';
 const activeTab = ref('dashboard');
 const data = ref(null);
 const loading = ref(true);
-const refreshTrigger = ref(0);
+
+// Per-tab refresh triggers — only the active tab gets incremented.
+const dashboardRefresh = ref(0);
+const walletsRefresh = ref(0);
+const reportRefresh = ref(0);
+
 let interval = null;
 
-async function refresh() {
+async function fetchStats() {
     try {
         const r = await fetch('/api/data');
         data.value = await r.json();
-        refreshTrigger.value++;
     } catch (e) {
         console.error('Dashboard refresh failed', e);
     } finally {
@@ -26,8 +30,23 @@ async function refresh() {
     }
 }
 
+function refresh() {
+    fetchStats();
+    // Trigger re-fetch only on the active tab's components.
+    if (activeTab.value === 'dashboard') dashboardRefresh.value++;
+    else if (activeTab.value === 'wallets') walletsRefresh.value++;
+    else if (activeTab.value === 'report') reportRefresh.value++;
+}
+
+// On tab switch, bump the newly active tab's trigger so it fetches fresh data.
+watch(activeTab, (newTab) => {
+    if (newTab === 'dashboard') dashboardRefresh.value++;
+    else if (newTab === 'wallets') walletsRefresh.value++;
+    else if (newTab === 'report') reportRefresh.value++;
+});
+
 onMounted(() => {
-    refresh();
+    fetchStats();
     interval = setInterval(refresh, 10000);
 });
 
@@ -77,30 +96,30 @@ function fmtTime(ts) {
             </div>
 
             <!-- Dashboard Tab -->
-            <div v-show="activeTab === 'dashboard'">
+            <div v-if="activeTab === 'dashboard'">
                 <BalanceBar v-if="data" :data="data" @refresh="refresh" />
                 <StatsCards v-if="data" :data="data" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Open Positions</h2>
-                <PositionsTable :refreshTrigger="refreshTrigger" @refresh="refresh" />
+                <PositionsTable :refreshTrigger="dashboardRefresh" @refresh="refresh" />
 
                 <h2 class="text-blue-400 text-base mt-5 mb-3">Recent Closed Trades</h2>
-                <TradeHistoryTable :refreshTrigger="refreshTrigger" />
+                <TradeHistoryTable :refreshTrigger="dashboardRefresh" />
             </div>
 
             <!-- Wallets Tab -->
-            <div v-show="activeTab === 'wallets'">
-                <WalletsManager v-if="data" :wallets="data.tracked_wallets_list" @refresh="refresh" />
+            <div v-if="activeTab === 'wallets'">
+                <WalletsManager :refreshTrigger="walletsRefresh" @refresh="refresh" />
             </div>
 
             <!-- Report Tab -->
-            <div v-show="activeTab === 'report'">
+            <div v-if="activeTab === 'report'">
                 <h2 class="text-blue-400 text-base mb-3">Wallet Performance Report</h2>
-                <WalletReport :refreshTrigger="refreshTrigger" @refresh="refresh" />
+                <WalletReport :refreshTrigger="reportRefresh" @refresh="refresh" />
             </div>
 
             <!-- Discover Tab -->
-            <div v-show="activeTab === 'discover'">
+            <div v-if="activeTab === 'discover'">
                 <h2 class="text-blue-400 text-base mb-3">Discover Top Traders</h2>
                 <WalletDiscovery @refresh="refresh" />
             </div>

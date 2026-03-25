@@ -9,6 +9,23 @@ use Illuminate\Http\Request;
 class WalletController extends Controller
 {
     /**
+     * List all tracked wallets.
+     */
+    public function index(): JsonResponse
+    {
+        $wallets = TrackedWallet::orderBy('id')->get()->map(fn ($w) => [
+            'address' => $w->address,
+            'name' => $w->name,
+            'profile_slug' => $w->profile_slug,
+            'is_paused' => (bool) $w->is_paused,
+            'paused_at' => $w->paused_at?->timestamp,
+            'pause_reason' => $w->pause_reason,
+        ])->all();
+
+        return response()->json(['data' => $wallets]);
+    }
+
+    /**
      * Add a tracked wallet.
      */
     public function store(Request $request): JsonResponse

@@ -51,11 +51,11 @@ npm run build                    # Build frontend assets
 
 ### Controllers (`app/Http/Controllers/`)
 
-- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns summary stats and balance info from DB using SQL aggregates (no positions/trades/wallet-report arrays — those use separate paginated endpoints).
+- **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns lightweight summary stats and balance info from DB using SQL aggregates (no positions/trades/wallets/wallet-report arrays — those use separate endpoints).
 - **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report (server-side sort/pagination). Uses SQL GROUP BY aggregation for realized P&L from trade history and unrealized from open positions (no full table loads).
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
-- **WalletController** - CRUD for tracked wallets: `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
+- **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
 
@@ -72,12 +72,12 @@ npm run build                    # Build frontend assets
 
 ### Vue Frontend (`resources/js/`)
 
-- **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Auto-refreshes `/api/data` every 10 seconds. Passes `refreshTrigger` counter to table components so they re-fetch their current page.
+- **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data.
 - **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount, and usage progress bar.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
 - **PositionsTable.vue** - Server-side paginated, sortable table of open positions. Fetches from `GET /api/positions` with page/sort/order params. Includes Close button and trader profile links.
 - **TradeHistoryTable.vue** - Server-side paginated, sortable table of closed trades. Fetches from `GET /api/trades` with page/sort/order params.
-- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause.
+- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`.
 - **WalletReport.vue** - Server-side paginated, sortable per-wallet performance report. Fetches from `GET /api/wallet-report` with page/sort/order params. Shows combined/realized/unrealized P&L, win rate, trade counts, performance rating badges, pause status and Pause/Resume action buttons. Summary cards include paused wallet count.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
 
@@ -150,6 +150,7 @@ All trading parameters are configurable via `.env`:
 
 - **Dashboard reads from DB only** - Prices are cached in the `positions` table by `bot:update-prices`. All API endpoints make zero external API calls, keeping response times ~20ms. Dashboard stats use SQL `SUM`/`COUNT` aggregates instead of loading rows into PHP.
 - **Server-side pagination** - Positions, trades, and wallet report tables use separate paginated API endpoints (`/api/positions`, `/api/trades`, `/api/wallet-report`) with server-side sorting and pagination. Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
+- **Lazy tab loading** - Dashboard uses `v-if` (not `v-show`) for tab content — inactive tabs unmount completely, stopping their API polling. Each tab has its own `refreshTrigger` counter; only the active tab gets bumped on the 10s interval. On tab switch, the new tab's trigger is bumped so it fetches fresh data immediately. Result: on non-Dashboard tabs, only the lightweight `/api/data` polls (stats + balance); no positions/trades/wallets queries fire.
 - **Trading balance limit** - User-configurable limit stored in `BotMeta`. When total invested + trade amount exceeds limit, BUY trades are skipped. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.

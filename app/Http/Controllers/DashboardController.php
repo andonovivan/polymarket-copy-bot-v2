@@ -59,14 +59,6 @@ class DashboardController extends Controller
             'trading_balance' => BotMeta::getValue('trading_balance'),
             'dry_run' => config('polymarket.dry_run'),
             'tracked_wallets' => TrackedWallet::count(),
-            'tracked_wallets_list' => TrackedWallet::orderBy('id')->get()->map(fn ($w) => [
-                'address' => $w->address,
-                'name' => $w->name,
-                'profile_slug' => $w->profile_slug,
-                'is_paused' => (bool) $w->is_paused,
-                'paused_at' => $w->paused_at?->timestamp,
-                'pause_reason' => $w->pause_reason,
-            ])->all(),
             'ts' => time(),
         ]);
     }
