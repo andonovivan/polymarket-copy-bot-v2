@@ -25,7 +25,7 @@ watch(() => props.refreshTrigger, fetchSummary);
 
 const columns = [
     { key: 'name', label: 'Trader' },
-    { key: 'composite_score', label: 'Score' },
+    { key: 'composite_score', label: 'Score', sortable: false },
     { key: 'combined_pnl', label: 'Combined P&L' },
     { key: 'realized_pnl', label: 'Realized' },
     { key: 'unrealized_pnl', label: 'Unrealized' },

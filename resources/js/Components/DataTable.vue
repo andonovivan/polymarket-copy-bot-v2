@@ -54,7 +54,13 @@ async function fetchData() {
 onMounted(fetchData);
 watch(() => props.refreshTrigger, fetchData);
 
-function setSort(key) {
+function isSortable(col) {
+    return col.sortable !== false;
+}
+
+function setSort(col) {
+    if (!isSortable(col)) return;
+    const key = col.key;
     if (sortKey.value === key) {
         sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
     } else {
@@ -86,7 +92,7 @@ function hasSlot(name) {
 }
 
 // Expose fetchData so parents can call it after mutations (e.g. close position).
-defineExpose({ fetchData, rows, total, lastPage, sortKey, sortOrder, page });
+defineExpose({ fetchData, isSortable, rows, total, lastPage, sortKey, sortOrder, page });
 </script>
 
 <template>
@@ -107,9 +113,12 @@ defineExpose({ fetchData, rows, total, lastPage, sortKey, sortOrder, page });
                 <thead>
                     <tr>
                         <th v-for="col in columns" :key="col.key"
-                            @click="setSort(col.key)"
-                            class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 cursor-pointer hover:text-gray-300 select-none whitespace-nowrap">
-                            {{ col.label }} <span class="text-[0.6em] ml-1">{{ arrow(col.key) }}</span>
+                            @click="setSort(col)"
+                            :class="[
+                                'text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 select-none whitespace-nowrap',
+                                isSortable(col) ? 'cursor-pointer hover:text-gray-300' : 'cursor-default'
+                            ]">
+                            {{ col.label }} <span v-if="isSortable(col)" class="text-[0.6em] ml-1">{{ arrow(col.key) }}</span>
                         </th>
                         <slot name="extra-headers" />
                     </tr>

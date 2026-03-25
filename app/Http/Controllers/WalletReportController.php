@@ -55,8 +55,12 @@ class WalletReportController extends Controller
             }
         }
 
-        // Compute average composite score.
-        $walletScores = (new WalletScoring)->compute($addresses);
+        // Compute average composite score only for wallets with activity.
+        $activeAddresses = array_unique(array_merge(
+            $realizedByWallet->keys()->all(),
+            $unrealizedByWallet->keys()->all(),
+        ));
+        $walletScores = ! empty($activeAddresses) ? (new WalletScoring)->compute($activeAddresses) : [];
         $scores = array_filter(array_map(fn ($s) => $s['composite_score'] ?? null, $walletScores), fn ($v) => $v !== null);
         $avgScore = count($scores) > 0 ? (int) round(array_sum($scores) / count($scores)) : null;
 
@@ -71,9 +75,11 @@ class WalletReportController extends Controller
     }
 
     /**
-     * Paginated wallet performance report with server-side sorting.
+     * Paginated wallet performance report.
      *
-     * Uses SQL aggregation instead of loading all trades/positions into PHP.
+     * Uses a single SQL query with LEFT JOINs for aggregation, sorting, and
+     * pagination (LIMIT/OFFSET). WalletScoring is computed only for the
+     * current page's wallets.
      */
     public function index(Request $request): JsonResponse
     {
@@ -82,118 +88,117 @@ class WalletReportController extends Controller
         $sort = $request->input('sort', 'combined_pnl');
         $order = strtolower($request->input('order', 'desc')) === 'asc' ? 'asc' : 'desc';
 
-        // Build full report — wallet count is small (typically < 100).
-        $walletLookup = TrackedWallet::all()->keyBy('address');
-        $addresses = $walletLookup->keys()->all();
+        // Whitelist sortable columns — map frontend keys to SQL expressions.
+        $sortable = [
+            'name' => 'tw.name',
+            'combined_pnl' => 'combined_pnl',
+            'realized_pnl' => 'realized_pnl',
+            'unrealized_pnl' => 'unrealized_pnl',
+            'win_rate' => 'win_rate',
+            'total_trades' => 'total_trades',
+            'open_positions' => 'open_positions',
+            'total_invested' => 'total_invested',
+            'is_paused' => 'tw.is_paused',
+        ];
 
-        $report = [];
-        foreach ($walletLookup as $addr => $w) {
-            $report[$addr] = [
-                'address' => $addr,
-                'name' => $w->name,
-                'profile_slug' => $w->profile_slug,
-                'is_paused' => (bool) $w->is_paused,
-                'paused_at' => $w->paused_at?->timestamp,
-                'pause_reason' => $w->pause_reason,
-                'realized_pnl' => 0.0,
-                'unrealized_pnl' => 0.0,
-                'total_trades' => 0,
-                'winning_trades' => 0,
-                'losing_trades' => 0,
-                'open_positions' => 0,
-                'total_invested' => 0.0,
-            ];
-        }
+        $orderBy = $sortable[$sort] ?? 'combined_pnl';
 
-        // Batch-aggregate realized stats with a single query.
-        $realizedStats = DB::table('trade_history')
-            ->select('copied_from_wallet')
-            ->selectRaw('COUNT(*) as total_trades')
-            ->selectRaw('SUM(CASE WHEN pnl >= 0 THEN 1 ELSE 0 END) as winning_trades')
-            ->selectRaw('SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades')
-            ->selectRaw('SUM(pnl) as realized_pnl')
-            ->whereIn('copied_from_wallet', $addresses)
-            ->groupBy('copied_from_wallet')
-            ->get();
+        // Single query: tracked_wallets LEFT JOIN aggregated trade_history and positions.
+        // Only returns wallets with at least 1 trade or 1 open position.
+        $query = DB::table('tracked_wallets as tw')
+            ->leftJoinSub(
+                DB::table('trade_history')
+                    ->select('copied_from_wallet')
+                    ->selectRaw('COUNT(*) as total_trades')
+                    ->selectRaw('SUM(CASE WHEN pnl >= 0 THEN 1 ELSE 0 END) as winning_trades')
+                    ->selectRaw('SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades')
+                    ->selectRaw('SUM(pnl) as realized_pnl')
+                    ->groupBy('copied_from_wallet'),
+                'th',
+                'tw.address',
+                '=',
+                'th.copied_from_wallet'
+            )
+            ->leftJoinSub(
+                DB::table('positions')
+                    ->select('copied_from_wallet')
+                    ->selectRaw('COUNT(*) as open_positions')
+                    ->selectRaw('SUM(buy_price * shares) as total_invested')
+                    ->selectRaw('SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END) as unrealized_pnl')
+                    ->where('shares', '>', 0)
+                    ->groupBy('copied_from_wallet'),
+                'pos',
+                'tw.address',
+                '=',
+                'pos.copied_from_wallet'
+            )
+            ->select(
+                'tw.address',
+                'tw.name',
+                'tw.profile_slug',
+                'tw.is_paused',
+                'tw.paused_at',
+                'tw.pause_reason',
+            )
+            ->selectRaw('COALESCE(th.total_trades, 0) as total_trades')
+            ->selectRaw('COALESCE(th.winning_trades, 0) as winning_trades')
+            ->selectRaw('COALESCE(th.losing_trades, 0) as losing_trades')
+            ->selectRaw('ROUND(COALESCE(th.realized_pnl, 0), 4) as realized_pnl')
+            ->selectRaw('COALESCE(pos.open_positions, 0) as open_positions')
+            ->selectRaw('ROUND(COALESCE(pos.total_invested, 0), 4) as total_invested')
+            ->selectRaw('ROUND(COALESCE(pos.unrealized_pnl, 0), 4) as unrealized_pnl')
+            ->selectRaw('ROUND(COALESCE(th.realized_pnl, 0) + COALESCE(pos.unrealized_pnl, 0), 4) as combined_pnl')
+            ->selectRaw('CASE WHEN COALESCE(th.total_trades, 0) > 0 THEN ROUND(COALESCE(th.winning_trades, 0) / th.total_trades * 100, 1) ELSE 0 END as win_rate')
+            // Filter: only wallets with activity.
+            ->where(function ($q) {
+                $q->where(DB::raw('COALESCE(th.total_trades, 0)'), '>', 0)
+                    ->orWhere(DB::raw('COALESCE(pos.open_positions, 0)'), '>', 0);
+            });
 
-        foreach ($realizedStats as $rs) {
-            $w = $rs->copied_from_wallet;
-            if (! isset($report[$w])) {
-                continue;
-            }
-            $report[$w]['total_trades'] = (int) $rs->total_trades;
-            $report[$w]['winning_trades'] = (int) $rs->winning_trades;
-            $report[$w]['losing_trades'] = (int) $rs->losing_trades;
-            $report[$w]['realized_pnl'] = (float) $rs->realized_pnl;
-        }
-
-        // Batch-aggregate unrealized stats with a single query.
-        $positionStats = DB::table('positions')
-            ->select('copied_from_wallet')
-            ->selectRaw('COUNT(*) as open_positions')
-            ->selectRaw('SUM(buy_price * shares) as total_invested')
-            ->selectRaw('SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END) as unrealized_pnl')
-            ->where('shares', '>', 0)
-            ->whereIn('copied_from_wallet', $addresses)
-            ->groupBy('copied_from_wallet')
-            ->get();
-
-        foreach ($positionStats as $ps) {
-            $w = $ps->copied_from_wallet;
-            if (! isset($report[$w])) {
-                continue;
-            }
-            $report[$w]['open_positions'] = (int) $ps->open_positions;
-            $report[$w]['total_invested'] = (float) $ps->total_invested;
-            $report[$w]['unrealized_pnl'] = (float) $ps->unrealized_pnl;
-        }
-
-        // Compute advanced metrics via WalletScoring service.
-        $walletScores = (new WalletScoring)->compute($addresses);
-
-        // Compute derived fields and merge scores.
-        $rows = array_values(array_map(function ($r) use ($walletScores) {
-            $r['realized_pnl'] = round($r['realized_pnl'], 4);
-            $r['unrealized_pnl'] = round($r['unrealized_pnl'], 4);
-            $r['combined_pnl'] = round($r['realized_pnl'] + $r['unrealized_pnl'], 4);
-            $r['total_invested'] = round($r['total_invested'], 4);
-            $r['win_rate'] = $r['total_trades'] > 0
-                ? round($r['winning_trades'] / $r['total_trades'] * 100, 1)
-                : 0;
-
-            $scores = $walletScores[$r['address']] ?? null;
-            $r['composite_score'] = $scores['composite_score'] ?? null;
-            $r['profit_factor'] = $scores['profit_factor'] ?? null;
-            $r['rolling_expectancy'] = $scores['rolling_expectancy'] ?? null;
-            $r['max_drawdown_pct'] = $scores['max_drawdown_pct'] ?? null;
-            $r['consistency'] = $scores['consistency'] ?? null;
-            $r['score_breakdown'] = $scores['score_breakdown'] ?? null;
-
-            return $r;
-        }, $report));
-
-        // Filter out wallets with no activity (no trades and no open positions).
-        $rows = array_values(array_filter($rows, fn ($r) => $r['total_trades'] > 0 || $r['open_positions'] > 0));
-
-        // Sort.
-        $sortKey = $sort;
-        usort($rows, function ($a, $b) use ($sortKey, $order) {
-            $va = $a[$sortKey] ?? 0;
-            $vb = $b[$sortKey] ?? 0;
-            if (is_string($va)) {
-                $cmp = strcasecmp($va, $vb);
-            } else {
-                $cmp = $va <=> $vb;
-            }
-
-            return $order === 'asc' ? $cmp : -$cmp;
-        });
-
-        // Paginate.
-        $total = count($rows);
+        // Count total matching rows (before pagination).
+        $total = $query->count();
         $lastPage = max(1, (int) ceil($total / $perPage));
         $offset = ($page - 1) * $perPage;
-        $data = array_slice($rows, $offset, $perPage);
+
+        // Fetch current page with sorting.
+        $pageRows = $query
+            ->orderBy(DB::raw($orderBy), $order)
+            ->offset($offset)
+            ->limit($perPage)
+            ->get();
+
+        // Compute WalletScoring only for this page's wallets.
+        $pageAddresses = $pageRows->pluck('address')->all();
+        $walletScores = ! empty($pageAddresses) ? (new WalletScoring)->compute($pageAddresses) : [];
+
+        // Map to response format.
+        $data = $pageRows->map(function ($r) use ($walletScores) {
+            $scores = $walletScores[$r->address] ?? null;
+
+            return [
+                'address' => $r->address,
+                'name' => $r->name,
+                'profile_slug' => $r->profile_slug,
+                'is_paused' => (bool) $r->is_paused,
+                'paused_at' => $r->paused_at ? strtotime($r->paused_at) : null,
+                'pause_reason' => $r->pause_reason,
+                'realized_pnl' => (float) $r->realized_pnl,
+                'unrealized_pnl' => (float) $r->unrealized_pnl,
+                'combined_pnl' => (float) $r->combined_pnl,
+                'total_trades' => (int) $r->total_trades,
+                'winning_trades' => (int) $r->winning_trades,
+                'losing_trades' => (int) $r->losing_trades,
+                'open_positions' => (int) $r->open_positions,
+                'total_invested' => (float) $r->total_invested,
+                'win_rate' => (float) $r->win_rate,
+                'composite_score' => $scores['composite_score'] ?? null,
+                'profit_factor' => $scores['profit_factor'] ?? null,
+                'rolling_expectancy' => $scores['rolling_expectancy'] ?? null,
+                'max_drawdown_pct' => $scores['max_drawdown_pct'] ?? null,
+                'consistency' => $scores['consistency'] ?? null,
+                'score_breakdown' => $scores['score_breakdown'] ?? null,
+            ];
+        })->all();
 
         return response()->json([
             'data' => $data,
