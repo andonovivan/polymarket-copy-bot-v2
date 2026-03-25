@@ -125,9 +125,12 @@ class TradeCopier
 
                 return false;
             }
+            $tradeAmountUsdc = null; // Not applicable for sells.
         } else {
-            $fixedAmountUsdc = config('polymarket.fixed_amount_usdc');
-            $fixedSize = round($fixedAmountUsdc / $trade->price, 2);
+            // Dynamic position sizing: % of available balance based on wallet score, with min/max caps.
+            $tradeAmountUsdc = $this->computeTradeAmount($trade->wallet);
+
+            $fixedSize = round($tradeAmountUsdc / $trade->price, 2);
             if ($fixedSize <= 0) {
                 Log::info('skipped_zero_size', ['trade_id' => $trade->tradeId]);
 
@@ -152,8 +155,6 @@ class TradeCopier
         }
 
         // --- Trading balance limit (BUY only) ---
-        $fixedAmountUsdc = config('polymarket.fixed_amount_usdc');
-
         if ($trade->side === 'BUY') {
             $tradingBalance = BotMeta::getValue('trading_balance');
             if ($tradingBalance !== null && $tradingBalance !== '') {
@@ -163,13 +164,13 @@ class TradeCopier
                 // Profits expand it, losses shrink it.
                 $realizedPnl = (float) PnlSummary::singleton()->total_realized;
                 $available = $tradingBalance - $totalInvested + $realizedPnl;
-                if ($tradingBalance > 0 && $fixedAmountUsdc > $available) {
+                if ($tradingBalance > 0 && $tradeAmountUsdc > $available) {
                     Log::warning('trading_balance_exceeded', [
                         'trade_id' => $trade->tradeId,
                         'total_invested' => round($totalInvested, 2),
                         'realized_pnl' => round($realizedPnl, 2),
                         'available' => round($available, 2),
-                        'would_add' => $fixedAmountUsdc,
+                        'would_add' => $tradeAmountUsdc,
                         'trading_balance' => $tradingBalance,
                     ]);
 
@@ -182,12 +183,12 @@ class TradeCopier
         $position = Position::where('asset_id', $trade->assetId)->first();
         $currentExposure = $position ? (float) $position->exposure : 0.0;
 
-        if ($trade->side === 'BUY' && $currentExposure + $fixedAmountUsdc > config('polymarket.max_position_usdc')) {
+        if ($trade->side === 'BUY' && $currentExposure + $tradeAmountUsdc > config('polymarket.max_position_usdc')) {
             Log::warning('exposure_cap_reached', [
                 'trade_id' => $trade->tradeId,
                 'asset_id' => $trade->assetId,
                 'current' => $currentExposure,
-                'would_add' => $fixedAmountUsdc,
+                'would_add' => $tradeAmountUsdc,
                 'cap' => config('polymarket.max_position_usdc'),
             ]);
 
@@ -208,7 +209,7 @@ class TradeCopier
             $oldPrice = (float) ($position->buy_price ?? 0);
 
             $position->shares = $newShares;
-            $position->exposure = ($position->exposure ?? 0) + $fixedAmountUsdc;
+            $position->exposure = ($position->exposure ?? 0) + $tradeAmountUsdc;
             $position->copied_from_wallet = $trade->wallet;
 
             // Only set opened_at on the first buy.
@@ -404,6 +405,70 @@ class TradeCopier
         }
 
         Log::info('reconcile_done');
+    }
+
+    /**
+     * Compute the USDC amount for a BUY trade based on the wallet's composite score
+     * and available balance. Uses a hybrid model: % of available balance with min/max caps.
+     *
+     * Tiers: score 70+ (high), 50-69 (mid), 30-49 (low), <30 or no score (fallback to fixed).
+     */
+    private function computeTradeAmount(string $walletAddress): float
+    {
+        $fallback = (float) config('polymarket.fixed_amount_usdc', 2.0);
+
+        // Compute available balance.
+        $tradingBalance = BotMeta::getValue('trading_balance');
+        if ($tradingBalance === null || $tradingBalance === '') {
+            return $fallback;
+        }
+        $tradingBalance = (float) $tradingBalance;
+        if ($tradingBalance <= 0) {
+            return $fallback;
+        }
+        $totalInvested = (float) Position::where('shares', '>', 0)->sum(DB::raw('buy_price * shares'));
+        $realizedPnl = (float) PnlSummary::singleton()->total_realized;
+        $available = $tradingBalance - $totalInvested + $realizedPnl;
+
+        if ($available <= 0) {
+            return $fallback;
+        }
+
+        // Get wallet's composite score.
+        $scores = (new WalletScoring)->compute([$walletAddress]);
+        $score = $scores[$walletAddress]['composite_score'] ?? null;
+
+        $sizingMin = (float) config('polymarket.sizing_min', 1.0);
+
+        if ($score === null || $score < 30) {
+            // No score or very low — use fixed amount as fallback.
+            return max($sizingMin, $fallback);
+        }
+
+        if ($score >= 70) {
+            $pct = (float) config('polymarket.sizing_high_pct', 0.50);
+            $max = (float) config('polymarket.sizing_high_max', 10.0);
+        } elseif ($score >= 50) {
+            $pct = (float) config('polymarket.sizing_mid_pct', 0.30);
+            $max = (float) config('polymarket.sizing_mid_max', 5.0);
+        } else {
+            $pct = (float) config('polymarket.sizing_low_pct', 0.15);
+            $max = (float) config('polymarket.sizing_low_max', 3.0);
+        }
+
+        $amount = $available * ($pct / 100);
+        $amount = max($sizingMin, min($max, $amount));
+
+        Log::info('dynamic_sizing', [
+            'wallet' => substr($walletAddress, 0, 10) . '...',
+            'score' => $score,
+            'available' => round($available, 2),
+            'pct' => $pct,
+            'raw_amount' => round($available * ($pct / 100), 2),
+            'capped_amount' => round($amount, 2),
+        ]);
+
+        return round($amount, 2);
     }
 
     /**

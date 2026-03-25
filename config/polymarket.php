@@ -36,6 +36,16 @@ return [
     // Composite wallet score — minimum trades to compute.
     'score_min_trades' => (int) env('POLYMARKET_SCORE_MIN_TRADES', 5),
 
+    // Dynamic position sizing — hybrid % of available balance with min/max caps.
+    // Tiers: high (score 70+), mid (score 50-69), low (score 30-49), below 30 = auto-paused.
+    'sizing_high_pct' => (float) env('POLYMARKET_SIZING_HIGH_PCT', 0.50),
+    'sizing_high_max' => (float) env('POLYMARKET_SIZING_HIGH_MAX', 10.0),
+    'sizing_mid_pct' => (float) env('POLYMARKET_SIZING_MID_PCT', 0.30),
+    'sizing_mid_max' => (float) env('POLYMARKET_SIZING_MID_MAX', 5.0),
+    'sizing_low_pct' => (float) env('POLYMARKET_SIZING_LOW_PCT', 0.15),
+    'sizing_low_max' => (float) env('POLYMARKET_SIZING_LOW_MAX', 3.0),
+    'sizing_min' => (float) env('POLYMARKET_SIZING_MIN', 1.0),
+
     // Wallet discovery — auto-discover top traders from the leaderboard.
     'discover_min_pnl' => (float) env('POLYMARKET_DISCOVER_MIN_PNL', 500),
     'discover_min_volume' => (float) env('POLYMARKET_DISCOVER_MIN_VOLUME', 10000),

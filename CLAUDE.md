@@ -95,7 +95,7 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_API_KEY`          | -                               | CLOB API key                         |
 | `POLYMARKET_API_SECRET`       | -                               | CLOB API secret                      |
 | `POLYMARKET_API_PASSPHRASE`   | -                               | CLOB API passphrase                  |
-| `POLYMARKET_FIXED_AMOUNT_USDC`| 2                               | Fixed USDC per copied trade          |
+| `POLYMARKET_FIXED_AMOUNT_USDC`| 2                               | Fallback USDC per trade (when no score available) |
 | `POLYMARKET_MAX_POSITION_USDC`| 100                             | Max exposure per market              |
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
@@ -111,6 +111,13 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_AUTO_PAUSE_MIN_PROFIT_FACTOR` | 1.0                | Profit factor below which wallet is paused (Rule 6) |
 | `POLYMARKET_AUTO_PAUSE_PROFIT_FACTOR_MIN_TRADES` | 10          | Min trades before profit factor rule applies (Rule 6) |
 | `POLYMARKET_SCORE_MIN_TRADES` | 5                               | Min closed trades to compute composite score |
+| `POLYMARKET_SIZING_HIGH_PCT`  | 0.50                            | % of available balance for score 70+ wallets |
+| `POLYMARKET_SIZING_HIGH_MAX`  | 10                              | Max USDC per trade for score 70+ wallets |
+| `POLYMARKET_SIZING_MID_PCT`   | 0.30                            | % of available balance for score 50-69 wallets |
+| `POLYMARKET_SIZING_MID_MAX`   | 5                               | Max USDC per trade for score 50-69 wallets |
+| `POLYMARKET_SIZING_LOW_PCT`   | 0.15                            | % of available balance for score 30-49 wallets |
+| `POLYMARKET_SIZING_LOW_MAX`   | 3                               | Max USDC per trade for score 30-49 wallets |
+| `POLYMARKET_SIZING_MIN`       | 1                               | Min USDC per trade (floor across all tiers) |
 | `POLYMARKET_DISCOVER_MIN_PNL` | 500                              | Min PNL to qualify as discovery candidate     |
 | `POLYMARKET_DISCOVER_MIN_VOLUME` | 10000                         | Min volume to qualify as discovery candidate  |
 | `POLYMARKET_DISCOVER_TIME_PERIOD` | WEEK                         | Leaderboard time period (DAY/WEEK/MONTH/ALL)  |
@@ -148,7 +155,7 @@ All trading parameters are configurable via `.env`:
 1. Check global pause — skip all if bot is paused
 2. Detect new trade from active (non-paused) tracked wallet
 3. Filter: skip sells if disabled, skip zero price
-4. Calculate size: `$2 / trade_price` for buys, all held shares for sells
+4. Calculate size: dynamic amount based on wallet score and available balance (hybrid % with min/max caps), all held shares for sells
 5. Price sanity: skip if midpoint deviates > 3 cents from trade price
 6. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
 7. Exposure cap: skip if would exceed $100 per market
@@ -161,6 +168,7 @@ All trading parameters are configurable via `.env`:
 - **Server-side pagination** - Positions, trades, and wallet report tables use separate paginated API endpoints (`/api/positions`, `/api/trades`, `/api/wallet-report`) with server-side sorting and pagination. Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
 - **Lazy tab loading** - Dashboard uses `v-if` (not `v-show`) for tab content — inactive tabs unmount completely, stopping their API polling. Each tab has its own `refreshTrigger` counter; only the active tab gets bumped on the 10s interval. On tab switch, the new tab's trigger is bumped so it fetches fresh data immediately. Result: on non-Dashboard tabs, only the lightweight `/api/data` polls (stats + balance); no positions/trades/wallets queries fire.
 - **Trading balance limit** - User-configurable limit stored in `BotMeta`. Uses Polymarket-style accounting: `Available = Limit - Total Invested + Realized P&L`. Profits expand available capital, losses shrink it. BUY trades are skipped when trade amount exceeds available. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
+- **Dynamic position sizing** - Hybrid % of available balance with min/max caps, scaled by wallet composite score. Three tiers: score 70+ (0.5%, max $10), score 50-69 (0.3%, max $5), score 30-49 (0.15%, max $3). All tiers have a $1 floor. Wallets with no score or score <30 use the fixed fallback amount ($2). As available balance grows, trade sizes grow proportionally; as it shrinks, sizes shrink automatically.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys.
