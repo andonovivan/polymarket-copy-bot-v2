@@ -73,7 +73,7 @@ npm run build                    # Build frontend assets
 ### Vue Frontend (`resources/js/`)
 
 - **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data.
-- **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount, and usage progress bar.
+- **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount (Polymarket-style: limit - invested + realized P&L), and usage progress bar.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested.
 - **DataTable.vue** - Generic server-side paginated, sortable table component. Handles fetch, sort, pagination, per-page size selector (10/25/50/100), loading spinner, and empty state. Exposes scoped slots (`#cell-{key}`, `#row-actions`, `#above-table`, `#extra-headers`) for custom cell rendering. Used by PositionsTable, TradeHistoryTable, and WalletReport.
 - **Pagination.vue** - Shared pagination (First/Prev/Next/Last) with per-page size dropdown. Used by all tables including WalletsManager.
@@ -143,7 +143,7 @@ All trading parameters are configurable via `.env`:
 2. Filter: skip sells if disabled, skip zero price
 3. Calculate size: `$2 / trade_price` for buys, all held shares for sells
 4. Price sanity: skip if midpoint deviates > 3 cents from trade price
-5. Trading balance limit: skip if total invested + trade amount would exceed user-set limit
+5. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
 6. Exposure cap: skip if would exceed $100 per market
 7. Place order via CLOB API (or log in dry-run mode)
 8. Update position with weighted-average buy price, save to DB
@@ -153,7 +153,7 @@ All trading parameters are configurable via `.env`:
 - **Dashboard reads from DB only** - Prices are cached in the `positions` table by `bot:update-prices`. All API endpoints make zero external API calls, keeping response times ~20ms. Dashboard stats use SQL `SUM`/`COUNT` aggregates instead of loading rows into PHP.
 - **Server-side pagination** - Positions, trades, and wallet report tables use separate paginated API endpoints (`/api/positions`, `/api/trades`, `/api/wallet-report`) with server-side sorting and pagination. Only 10 rows per request instead of full datasets. The 10s auto-refresh triggers table re-fetches via a `refreshTrigger` counter prop.
 - **Lazy tab loading** - Dashboard uses `v-if` (not `v-show`) for tab content — inactive tabs unmount completely, stopping their API polling. Each tab has its own `refreshTrigger` counter; only the active tab gets bumped on the 10s interval. On tab switch, the new tab's trigger is bumped so it fetches fresh data immediately. Result: on non-Dashboard tabs, only the lightweight `/api/data` polls (stats + balance); no positions/trades/wallets queries fire.
-- **Trading balance limit** - User-configurable limit stored in `BotMeta`. When total invested + trade amount exceeds limit, BUY trades are skipped. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
+- **Trading balance limit** - User-configurable limit stored in `BotMeta`. Uses Polymarket-style accounting: `Available = Limit - Total Invested + Realized P&L`. Profits expand available capital, losses shrink it. BUY trades are skipped when trade amount exceeds available. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys.
