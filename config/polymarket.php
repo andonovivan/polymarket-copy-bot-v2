@@ -11,6 +11,7 @@ return [
     'fixed_amount_usdc' => (float) env('POLYMARKET_FIXED_AMOUNT_USDC', 2.0),
     'max_position_usdc' => (float) env('POLYMARKET_MAX_POSITION_USDC', 100.0),
     'price_tolerance' => (float) env('POLYMARKET_PRICE_TOLERANCE', 0.03),
+    'min_trade_price' => (float) env('POLYMARKET_MIN_TRADE_PRICE', 0.05),
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),

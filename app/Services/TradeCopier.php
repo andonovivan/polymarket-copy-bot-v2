@@ -109,9 +109,15 @@ class TradeCopier
             return false;
         }
 
-        // --- Zero price ---
-        if ($trade->price <= 0) {
-            Log::info('skipped_zero_price', ['trade_id' => $trade->tradeId]);
+        // --- Minimum price filter ---
+        // Skip trades at or near zero (penny bets like 1-2¢ are high-risk lottery tickets).
+        $minPrice = (float) config('polymarket.min_trade_price', 0.05);
+        if ($trade->price < $minPrice) {
+            Log::info('skipped_below_min_price', [
+                'trade_id' => $trade->tradeId,
+                'price' => $trade->price,
+                'min' => $minPrice,
+            ]);
 
             return false;
         }
