@@ -52,7 +52,7 @@ npm run build                    # Build frontend assets
 ### Controllers (`app/Http/Controllers/`)
 
 - **DashboardController** - `GET /` renders the Vue dashboard. `GET /api/data` returns lightweight summary stats and balance info from DB using SQL aggregates (no positions/trades/wallets/wallet-report arrays — those use separate endpoints).
-- **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report (server-side sort/pagination). Uses SQL GROUP BY aggregation for realized P&L from trade history and unrealized from open positions (no full table loads).
+- **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report (server-side sort/pagination). `GET /api/wallet-report/summary` returns aggregate totals (profitable/losing/paused counts, best performer) across all wallets — fetched separately from table data. Uses SQL GROUP BY aggregation for realized P&L from trade history and unrealized from open positions (no full table loads).
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). `POST /api/close` manually closes a position at current midpoint.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination).
 - **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
@@ -80,7 +80,7 @@ npm run build                    # Build frontend assets
 - **PositionsTable.vue** - Uses DataTable with `apiUrl="/api/positions"`. Custom slots for Close button, status badges, null price handling, and trader profile links.
 - **TradeHistoryTable.vue** - Uses DataTable with `apiUrl="/api/trades"`. Minimal custom slots (trader link, P&L coloring).
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
-- **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Custom slots for summary cards (`#above-table`), rating/status badges, Pause/Resume buttons, and win rate coloring.
+- **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Summary cards fetched independently from `GET /api/wallet-report/summary` (totals across all wallets, not just current page). Custom slots for rating/status badges, Pause/Resume buttons, and win rate coloring.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
 
 ### Configuration (`config/polymarket.php`)

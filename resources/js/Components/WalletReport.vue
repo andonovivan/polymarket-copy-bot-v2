@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import DataTable from './DataTable.vue';
 import { fmtUsd, pnlClass, traderLabel, traderUrl } from '../utils/formatters.js';
 
@@ -9,6 +9,19 @@ const props = defineProps({
 });
 
 const tableRef = ref(null);
+const summary = ref({ total: 0, profitable: 0, losing: 0, paused: 0, best_performer: '-' });
+
+async function fetchSummary() {
+    try {
+        const r = await fetch('/api/wallet-report/summary');
+        summary.value = await r.json();
+    } catch (e) {
+        console.error('Failed to fetch wallet report summary', e);
+    }
+}
+
+onMounted(fetchSummary);
+watch(() => props.refreshTrigger, fetchSummary);
 
 const columns = [
     { key: 'name', label: 'Trader' },
@@ -33,6 +46,7 @@ async function togglePause(addr, paused) {
         if (d.error) { console.error(d.error); return; }
         emit('refresh');
         tableRef.value?.fetchData();
+        fetchSummary();
     } catch (e) { console.error('Failed to toggle pause', e); }
 }
 
@@ -58,35 +72,27 @@ function performanceTag(w) {
                emptyMessage="No tracked wallets" loadingMessage="Loading report..."
                :refreshTrigger="refreshTrigger" @refresh="emit('refresh')">
 
-        <template #above-table="{ rows, total, lastPage, sortKey, sortOrder }">
+        <template #above-table>
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
                 <div class="bg-gray-900 border border-gray-800 rounded p-3">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
-                    <div class="text-lg font-bold text-gray-200">{{ total }}</div>
+                    <div class="text-lg font-bold text-gray-200">{{ summary.total }}</div>
                 </div>
                 <div class="bg-gray-900 border border-gray-800 rounded p-3">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Profitable</div>
-                    <div class="text-lg font-bold text-green-400">
-                        {{ rows.filter(w => w.combined_pnl > 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
-                    </div>
+                    <div class="text-lg font-bold text-green-400">{{ summary.profitable }}</div>
                 </div>
                 <div class="bg-gray-900 border border-gray-800 rounded p-3">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Losing</div>
-                    <div class="text-lg font-bold text-red-400">
-                        {{ rows.filter(w => w.combined_pnl < 0).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
-                    </div>
+                    <div class="text-lg font-bold text-red-400">{{ summary.losing }}</div>
                 </div>
                 <div class="bg-gray-900 border border-gray-800 rounded p-3">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
-                    <div class="text-lg font-bold text-orange-400">
-                        {{ rows.filter(w => w.is_paused).length }}<span v-if="lastPage > 1" class="text-gray-600 text-xs">+</span>
-                    </div>
+                    <div class="text-lg font-bold text-orange-400">{{ summary.paused }}</div>
                 </div>
                 <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
-                    <div class="text-lg font-bold truncate" :class="pnlClass(rows.length ? rows[0]?.combined_pnl : 0)">
-                        {{ rows.length && sortKey === 'combined_pnl' && sortOrder === 'desc' ? traderLabel(rows[0]) : '-' }}
-                    </div>
+                    <div class="text-lg font-bold text-green-400 truncate">{{ summary.best_performer || '-' }}</div>
                 </div>
             </div>
         </template>

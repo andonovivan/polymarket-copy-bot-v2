@@ -20,5 +20,6 @@ Route::delete('/wallets', [WalletController::class, 'destroy']);
 Route::post('/close', [PositionController::class, 'close']);
 Route::put('/balance', [BalanceController::class, 'update']);
 Route::get('/wallet-report', [WalletReportController::class, 'index']);
+Route::get('/wallet-report/summary', [WalletReportController::class, 'summary']);
 Route::get('/discover', [DiscoverController::class, 'index']);
 Route::post('/discover', [DiscoverController::class, 'store']);

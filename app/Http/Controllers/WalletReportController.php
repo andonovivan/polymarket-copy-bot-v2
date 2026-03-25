@@ -10,6 +10,60 @@ use Illuminate\Support\Facades\DB;
 class WalletReportController extends Controller
 {
     /**
+     * Summary stats across all wallets (separate from paginated data).
+     */
+    public function summary(): JsonResponse
+    {
+        $wallets = TrackedWallet::all();
+        $addresses = $wallets->pluck('address')->all();
+
+        // Realized P&L per wallet.
+        $realizedByWallet = DB::table('trade_history')
+            ->selectRaw('copied_from_wallet, SUM(pnl) as realized_pnl')
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->pluck('realized_pnl', 'copied_from_wallet');
+
+        // Unrealized P&L per wallet.
+        $unrealizedByWallet = DB::table('positions')
+            ->selectRaw('copied_from_wallet, SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END) as unrealized_pnl')
+            ->where('shares', '>', 0)
+            ->whereIn('copied_from_wallet', $addresses)
+            ->groupBy('copied_from_wallet')
+            ->pluck('unrealized_pnl', 'copied_from_wallet');
+
+        $profitable = 0;
+        $losing = 0;
+        $paused = 0;
+        $bestName = null;
+        $bestPnl = null;
+
+        foreach ($wallets as $w) {
+            $combined = (float) ($realizedByWallet[$w->address] ?? 0) + (float) ($unrealizedByWallet[$w->address] ?? 0);
+            if ($combined > 0) {
+                $profitable++;
+            } elseif ($combined < 0) {
+                $losing++;
+            }
+            if ($w->is_paused) {
+                $paused++;
+            }
+            if ($bestPnl === null || $combined > $bestPnl) {
+                $bestPnl = $combined;
+                $bestName = $w->name ?: substr($w->address, 0, 8) . '...';
+            }
+        }
+
+        return response()->json([
+            'total' => $wallets->count(),
+            'profitable' => $profitable,
+            'losing' => $losing,
+            'paused' => $paused,
+            'best_performer' => $bestName,
+        ]);
+    }
+
+    /**
      * Paginated wallet performance report with server-side sorting.
      *
      * Uses SQL aggregation instead of loading all trades/positions into PHP.

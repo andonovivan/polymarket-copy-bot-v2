@@ -101,7 +101,7 @@ defineExpose({ fetchData, rows, total, lastPage, sortKey, sortOrder, page });
         </div>
 
         <template v-else>
-            <slot name="above-table" :rows="rows" :total="total" :lastPage="lastPage" :sortKey="sortKey" :sortOrder="sortOrder" />
+            <slot name="above-table" />
 
             <table class="w-full mb-2">
                 <thead>
