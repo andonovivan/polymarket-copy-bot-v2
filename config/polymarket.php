@@ -27,6 +27,14 @@ return [
     'auto_pause_bad_record_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS', -10),
     // Rule 4: Small sample but zero wins.
     'auto_pause_zero_win_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES', 3),
+    // Rule 5: Negative rolling expectancy (avg P&L over last N trades).
+    'auto_pause_rolling_expectancy_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ROLLING_EXPECTANCY_TRADES', 20),
+    // Rule 6: Low profit factor (gross profit / gross loss < threshold after N trades).
+    'auto_pause_min_profit_factor' => (float) env('POLYMARKET_AUTO_PAUSE_MIN_PROFIT_FACTOR', 1.0),
+    'auto_pause_profit_factor_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_PROFIT_FACTOR_MIN_TRADES', 10),
+
+    // Composite wallet score — minimum trades to compute.
+    'score_min_trades' => (int) env('POLYMARKET_SCORE_MIN_TRADES', 5),
 
     // Wallet discovery — auto-discover top traders from the leaderboard.
     'discover_min_pnl' => (float) env('POLYMARKET_DISCOVER_MIN_PNL', 500),

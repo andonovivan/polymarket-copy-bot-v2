@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\TrackedWallet;
+use App\Services\WalletScoring;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -27,6 +28,9 @@ class CheckWallets extends Command
         $badRecordMaxWinRate = (float) config('polymarket.auto_pause_bad_record_max_win_rate', 40);
         $badRecordMaxLoss = (float) config('polymarket.auto_pause_bad_record_max_loss', -10);
         $zeroWinMinTrades = (int) config('polymarket.auto_pause_zero_win_min_trades', 3);
+        $rollingExpectancyTrades = (int) config('polymarket.auto_pause_rolling_expectancy_trades', 20);
+        $minProfitFactor = (float) config('polymarket.auto_pause_min_profit_factor', 1.0);
+        $profitFactorMinTrades = (int) config('polymarket.auto_pause_profit_factor_min_trades', 10);
 
         $addresses = $wallets->pluck('address')->all();
 
@@ -51,6 +55,9 @@ class CheckWallets extends Command
             ->groupBy('copied_from_wallet')
             ->get()
             ->keyBy('copied_from_wallet');
+
+        // Compute advanced metrics (rolling expectancy, profit factor) in one query.
+        $walletScores = (new WalletScoring)->compute($addresses);
 
         $pausedCount = 0;
 
@@ -93,6 +100,26 @@ class CheckWallets extends Command
                 $reason = 'auto:zero_wins';
             }
 
+            // Rule 5: Negative rolling expectancy (last N trades losing on average).
+            if (! $reason) {
+                $metrics = $walletScores[$address] ?? null;
+                if ($metrics && $metrics['total_closed_trades'] >= $rollingExpectancyTrades
+                    && $metrics['rolling_expectancy'] !== null
+                    && $metrics['rolling_expectancy'] < 0) {
+                    $reason = 'auto:negative_rolling_expectancy';
+                }
+            }
+
+            // Rule 6: Low profit factor (gross profit / gross loss < threshold).
+            if (! $reason) {
+                $metrics = $walletScores[$address] ?? null;
+                if ($metrics && $metrics['total_closed_trades'] >= $profitFactorMinTrades
+                    && $metrics['profit_factor'] !== null
+                    && $metrics['profit_factor'] < $minProfitFactor) {
+                    $reason = 'auto:low_profit_factor';
+                }
+            }
+
             if ($reason) {
                 $wallet->update([
                     'is_paused' => true,
@@ -100,6 +127,7 @@ class CheckWallets extends Command
                     'pause_reason' => $reason,
                 ]);
 
+                $m = $walletScores[$address] ?? [];
                 Log::warning('wallet_auto_paused', [
                     'address' => substr($address, 0, 10) . '...',
                     'reason' => $reason,
@@ -108,6 +136,9 @@ class CheckWallets extends Command
                     'unrealized_pnl' => round($unrealizedPnl, 2),
                     'total_invested' => round($totalInvested, 2),
                     'total_trades' => $totalTrades,
+                    'rolling_expectancy' => $m['rolling_expectancy'] ?? null,
+                    'profit_factor' => $m['profit_factor'] ?? null,
+                    'composite_score' => $m['composite_score'] ?? null,
                 ]);
 
                 $pausedCount++;

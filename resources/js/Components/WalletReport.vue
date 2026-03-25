@@ -9,7 +9,7 @@ const props = defineProps({
 });
 
 const tableRef = ref(null);
-const summary = ref({ total: 0, profitable: 0, losing: 0, paused: 0, best_performer: '-' });
+const summary = ref({ total: 0, profitable: 0, losing: 0, paused: 0, best_performer: '-', average_score: null });
 
 async function fetchSummary() {
     try {
@@ -25,6 +25,7 @@ watch(() => props.refreshTrigger, fetchSummary);
 
 const columns = [
     { key: 'name', label: 'Trader' },
+    { key: 'composite_score', label: 'Score' },
     { key: 'combined_pnl', label: 'Combined P&L' },
     { key: 'realized_pnl', label: 'Realized' },
     { key: 'unrealized_pnl', label: 'Unrealized' },
@@ -56,13 +57,22 @@ function pauseStatusTag(w) {
     return { text: 'Paused', cls: 'bg-orange-800 text-orange-300' };
 }
 
-function performanceTag(w) {
-    if (w.total_trades === 0 && w.open_positions === 0) return { text: 'NO DATA', cls: 'bg-gray-700 text-gray-400' };
-    if (w.combined_pnl > 0 && w.win_rate >= 55) return { text: 'STRONG', cls: 'bg-green-800 text-green-300' };
-    if (w.combined_pnl > 0) return { text: 'GOOD', cls: 'bg-green-900 text-green-400' };
-    if (w.combined_pnl === 0) return { text: 'NEUTRAL', cls: 'bg-gray-700 text-gray-300' };
-    if (w.combined_pnl > -2) return { text: 'WEAK', cls: 'bg-yellow-900 text-yellow-300' };
-    return { text: 'POOR', cls: 'bg-red-900 text-red-300' };
+function scoreColor(score) {
+    if (score === null || score === undefined) return '#6b7280';
+    if (score >= 86) return '#4ade80';
+    if (score >= 71) return '#22c55e';
+    if (score >= 51) return '#eab308';
+    if (score >= 31) return '#f97316';
+    return '#ef4444';
+}
+
+function scoreLabel(score) {
+    if (score === null || score === undefined) return 'N/A';
+    if (score >= 86) return 'Excellent';
+    if (score >= 71) return 'Strong';
+    if (score >= 51) return 'Average';
+    if (score >= 31) return 'Weak';
+    return 'Poor';
 }
 </script>
 
@@ -73,7 +83,7 @@ function performanceTag(w) {
                :refreshTrigger="refreshTrigger" @refresh="emit('refresh')">
 
         <template #above-table>
-            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
                 <div class="bg-gray-900 border border-gray-800 rounded p-3">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Total Wallets</div>
                     <div class="text-lg font-bold text-gray-200">{{ summary.total }}</div>
@@ -90,6 +100,12 @@ function performanceTag(w) {
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Paused</div>
                     <div class="text-lg font-bold text-orange-400">{{ summary.paused }}</div>
                 </div>
+                <div class="bg-gray-900 border border-gray-800 rounded p-3">
+                    <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Avg Score</div>
+                    <div class="text-lg font-bold" :style="{ color: scoreColor(summary.average_score) }">
+                        {{ summary.average_score !== null ? summary.average_score : '-' }}
+                    </div>
+                </div>
                 <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
                     <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
                     <div class="text-lg font-bold text-green-400 truncate">{{ summary.best_performer || '-' }}</div>
@@ -102,6 +118,50 @@ function performanceTag(w) {
                class="text-blue-400 hover:text-blue-300 hover:underline">
                 {{ traderLabel(row) }}
             </a>
+        </template>
+
+        <template #cell-composite_score="{ row }">
+            <div v-if="row.composite_score !== null" class="relative group inline-block">
+                <span class="font-bold text-sm"
+                      :style="{ color: scoreColor(row.composite_score) }">
+                    {{ row.composite_score }}
+                </span>
+                <span class="text-xs ml-1" :style="{ color: scoreColor(row.composite_score), opacity: 0.7 }">
+                    {{ scoreLabel(row.composite_score) }}
+                </span>
+                <!-- Hover tooltip with breakdown -->
+                <div class="hidden group-hover:block absolute z-20 left-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg p-3 shadow-xl whitespace-nowrap text-xs min-w-[180px]">
+                    <div class="font-semibold text-gray-300 mb-2 border-b border-gray-700 pb-1">Score Breakdown</div>
+                    <div v-if="row.score_breakdown" class="space-y-1">
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-400">Profit Factor</span>
+                            <span class="text-gray-200">{{ row.score_breakdown.profit_factor?.toFixed(0) ?? '-' }}</span>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-400">Expectancy</span>
+                            <span class="text-gray-200">{{ row.score_breakdown.rolling_expectancy?.toFixed(0) ?? '-' }}</span>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-400">Win Rate</span>
+                            <span class="text-gray-200">{{ row.score_breakdown.win_rate?.toFixed(0) ?? '-' }}</span>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-400">Drawdown</span>
+                            <span class="text-gray-200">{{ row.score_breakdown.max_drawdown?.toFixed(0) ?? '-' }}</span>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                            <span class="text-gray-400">Consistency</span>
+                            <span class="text-gray-200">{{ row.score_breakdown.consistency?.toFixed(0) ?? '-' }}</span>
+                        </div>
+                    </div>
+                    <div class="mt-2 pt-1 border-t border-gray-700 text-gray-500">
+                        PF: {{ row.profit_factor?.toFixed(2) ?? '-' }} ·
+                        Exp: {{ row.rolling_expectancy !== null ? (row.rolling_expectancy >= 0 ? '+' : '') + row.rolling_expectancy.toFixed(3) : '-' }} ·
+                        DD: {{ row.max_drawdown_pct?.toFixed(0) ?? '-' }}%
+                    </div>
+                </div>
+            </div>
+            <span v-else class="text-gray-600 text-xs">N/A</span>
         </template>
 
         <template #cell-combined_pnl="{ row }">
@@ -145,19 +205,10 @@ function performanceTag(w) {
         </template>
 
         <template #extra-headers>
-            <th class="text-left text-gray-500 text-xs uppercase tracking-wide px-3 py-2 border-b border-gray-700 whitespace-nowrap">
-                Rating
-            </th>
             <th class="px-3 py-2 border-b border-gray-700"></th>
         </template>
 
         <template #row-actions="{ row }">
-            <td class="px-3 py-2 border-b border-gray-800 text-sm">
-                <span :class="performanceTag(row).cls"
-                      class="px-2 py-0.5 rounded text-xs font-semibold">
-                    {{ performanceTag(row).text }}
-                </span>
-            </td>
             <td class="px-3 py-2 border-b border-gray-800">
                 <button v-if="!row.is_paused" @click="togglePause(row.address, true)"
                         class="bg-orange-700 hover:bg-orange-600 text-white text-xs px-3 py-1 rounded">

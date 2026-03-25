@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\TrackedWallet;
+use App\Services\WalletScoring;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -54,12 +55,18 @@ class WalletReportController extends Controller
             }
         }
 
+        // Compute average composite score.
+        $walletScores = (new WalletScoring)->compute($addresses);
+        $scores = array_filter(array_map(fn ($s) => $s['composite_score'] ?? null, $walletScores), fn ($v) => $v !== null);
+        $avgScore = count($scores) > 0 ? (int) round(array_sum($scores) / count($scores)) : null;
+
         return response()->json([
             'total' => $wallets->count(),
             'profitable' => $profitable,
             'losing' => $losing,
             'paused' => $paused,
             'best_performer' => $bestName,
+            'average_score' => $avgScore,
         ]);
     }
 
@@ -141,8 +148,11 @@ class WalletReportController extends Controller
             $report[$w]['unrealized_pnl'] = (float) $ps->unrealized_pnl;
         }
 
-        // Compute derived fields.
-        $rows = array_values(array_map(function ($r) {
+        // Compute advanced metrics via WalletScoring service.
+        $walletScores = (new WalletScoring)->compute($addresses);
+
+        // Compute derived fields and merge scores.
+        $rows = array_values(array_map(function ($r) use ($walletScores) {
             $r['realized_pnl'] = round($r['realized_pnl'], 4);
             $r['unrealized_pnl'] = round($r['unrealized_pnl'], 4);
             $r['combined_pnl'] = round($r['realized_pnl'] + $r['unrealized_pnl'], 4);
@@ -150,6 +160,14 @@ class WalletReportController extends Controller
             $r['win_rate'] = $r['total_trades'] > 0
                 ? round($r['winning_trades'] / $r['total_trades'] * 100, 1)
                 : 0;
+
+            $scores = $walletScores[$r['address']] ?? null;
+            $r['composite_score'] = $scores['composite_score'] ?? null;
+            $r['profit_factor'] = $scores['profit_factor'] ?? null;
+            $r['rolling_expectancy'] = $scores['rolling_expectancy'] ?? null;
+            $r['max_drawdown_pct'] = $scores['max_drawdown_pct'] ?? null;
+            $r['consistency'] = $scores['consistency'] ?? null;
+            $r['score_breakdown'] = $scores['score_breakdown'] ?? null;
 
             return $r;
         }, $report));
