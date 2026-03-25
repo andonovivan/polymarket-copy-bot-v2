@@ -66,6 +66,13 @@ class UpdatePrices extends Command
                     $position->price_updated_at = $now;
                     $position->save();
                     $updated++;
+                } elseif ($position->current_price === null) {
+                    // No midpoint and not resolved — use buy price as fallback
+                    // so the dashboard shows $0.00 P&L instead of "–".
+                    $position->current_price = $position->buy_price;
+                    $position->price_updated_at = $now;
+                    $position->save();
+                    $updated++;
                 }
             }
         }
