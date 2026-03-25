@@ -27,4 +27,12 @@ return [
     'auto_pause_bad_record_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS', -10),
     // Rule 4: Small sample but zero wins.
     'auto_pause_zero_win_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES', 3),
+
+    // Wallet discovery — auto-discover top traders from the leaderboard.
+    'discover_min_pnl' => (float) env('POLYMARKET_DISCOVER_MIN_PNL', 500),
+    'discover_min_volume' => (float) env('POLYMARKET_DISCOVER_MIN_VOLUME', 10000),
+    'discover_time_period' => env('POLYMARKET_DISCOVER_TIME_PERIOD', 'WEEK'),
+    'discover_category' => env('POLYMARKET_DISCOVER_CATEGORY', 'OVERALL'),
+    'discover_limit' => (int) env('POLYMARKET_DISCOVER_LIMIT', 20),
+    'discover_max_auto_add' => (int) env('POLYMARKET_DISCOVER_MAX_AUTO_ADD', 3),
 ];

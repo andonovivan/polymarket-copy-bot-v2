@@ -42,7 +42,9 @@ function pnlClass(v) {
 }
 
 function traderLabel(w) {
-    return w.name || w.address.slice(0, 8) + '...';
+    const name = w.name || '';
+    if (!name || name.startsWith('0x') || name.length > 20) return w.address.slice(0, 8) + '...';
+    return name;
 }
 
 function traderUrl(w) {
@@ -117,9 +119,9 @@ const columns = [
                     {{ wallets.filter(w => w.is_paused).length }}
                 </div>
             </div>
-            <div class="bg-gray-900 border border-gray-800 rounded p-3">
+            <div class="bg-gray-900 border border-gray-800 rounded p-3 overflow-hidden">
                 <div class="text-gray-500 text-xs uppercase tracking-wide mb-1">Best Performer</div>
-                <div class="text-lg font-bold" :class="pnlClass(sorted.length ? sorted[sortKey === 'combined_pnl' && !sortAsc ? 0 : sorted.length - 1]?.combined_pnl : 0)">
+                <div class="text-lg font-bold truncate" :class="pnlClass(sorted.length ? sorted[sortKey === 'combined_pnl' && !sortAsc ? 0 : sorted.length - 1]?.combined_pnl : 0)">
                     {{ wallets.length ? traderLabel(wallets.reduce((best, w) => w.combined_pnl > best.combined_pnl ? w : best, wallets[0])) : '-' }}
                 </div>
             </div>
