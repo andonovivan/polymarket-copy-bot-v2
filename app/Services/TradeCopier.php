@@ -215,6 +215,33 @@ class TradeCopier
             return false;
         }
 
+        // --- Per-wallet exposure cap (BUY only) ---
+        if ($trade->side === 'BUY') {
+            $maxWalletExposure = (float) config('polymarket.max_wallet_exposure_usdc');
+            if ($maxWalletExposure > 0) {
+                $walletInvested = (float) Position::where('shares', '>', 0)
+                    ->where('copied_from_wallet', $trade->wallet)
+                    ->sum(DB::raw('buy_price * shares'));
+                $walletPendingBuys = (float) PendingOrder::pending()
+                    ->where('side', 'BUY')
+                    ->where('copied_from_wallet', $trade->wallet)
+                    ->sum('amount_usdc');
+
+                if ($walletInvested + $walletPendingBuys + $tradeAmountUsdc > $maxWalletExposure) {
+                    Log::warning('wallet_exposure_cap_reached', [
+                        'trade_id' => $trade->tradeId,
+                        'wallet' => substr($trade->wallet, 0, 10) . '...',
+                        'wallet_invested' => round($walletInvested, 2),
+                        'wallet_pending' => round($walletPendingBuys, 2),
+                        'would_add' => $tradeAmountUsdc,
+                        'cap' => $maxWalletExposure,
+                    ]);
+
+                    return false;
+                }
+            }
+        }
+
         // --- Place order ---
         $result = $this->client->placeOrder($trade->assetId, $trade->side, $trade->price, $fixedSize);
         if ($result === null) {

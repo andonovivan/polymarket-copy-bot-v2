@@ -100,9 +100,11 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_API_SECRET`       | -                               | CLOB API secret                      |
 | `POLYMARKET_API_PASSPHRASE`   | -                               | CLOB API passphrase                  |
 | `POLYMARKET_FIXED_AMOUNT_USDC`| 2                               | Fallback USDC per trade (when no score available) |
-| `POLYMARKET_MAX_POSITION_USDC`| 100                             | Max exposure per market              |
+| `POLYMARKET_MAX_POSITION_USDC`| 10                              | Max exposure per market              |
+| `POLYMARKET_MAX_WALLET_EXPOSURE_USDC` | 20                      | Max total exposure per tracked wallet |
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
+| `POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS` | 5                  | Time window to merge multi-fill trades from same order |
 | `POLYMARKET_DRY_RUN`          | true                            | Log only, no real orders             |
 | `POLYMARKET_POLL_BATCH_SIZE`  | 15                              | Wallets per concurrent batch in poll cycle |
 | `POLYMARKET_POLL_BATCH_DELAY_MS` | 500                          | Delay between batches in milliseconds |
@@ -161,15 +163,17 @@ All trading parameters are configurable via `.env`:
 ### Trade Copy Pipeline
 
 1. Check global pause — skip all if bot is paused
-2. Detect new trade from active (non-paused) tracked wallet
-3. Filter: skip sells if disabled, skip zero price
-4. Calculate size: dynamic amount based on wallet score and available balance (hybrid % with min/max caps), all held shares for sells
-5. Price sanity: skip if midpoint deviates > 3 cents from trade price
-6. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
-7. Exposure cap: skip if would exceed $100 per market
-8. Place order via CLOB API (or log in dry-run mode)
-9. If matched/dry-run: extract actual fill price, update position immediately with weighted-average buy price, fetch market_slug
-10. If live/delayed: create PendingOrder record, defer position update. `bot:check-orders` will poll for fill and apply update or auto-cancel after 10min TTL
+2. Detect new trades from active (non-paused) tracked wallets
+3. **Coalesce multi-fill trades** — group by (wallet + asset + side) within 5s window, merge into single trade with VWAP and summed size
+4. Filter: skip sells if disabled, skip below min price ($0.05)
+5. Calculate size: dynamic amount based on wallet score and available balance (hybrid % with min/max caps), all held shares for sells
+6. Price sanity: skip if midpoint deviates > 3 cents from trade price
+7. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
+8. Per-market exposure cap: skip if would exceed $10 per market
+9. **Per-wallet exposure cap**: skip if total invested from this wallet would exceed $20
+10. Place order via CLOB API (or log in dry-run mode)
+11. If matched/dry-run: extract actual fill price, update position immediately with weighted-average buy price, fetch market_slug
+12. If live/delayed: create PendingOrder record, defer position update. `bot:check-orders` will poll for fill and apply update or auto-cancel after 10min TTL
 
 ## Key Design Decisions
 
@@ -182,6 +186,8 @@ All trading parameters are configurable via `.env`:
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys. Uses the actual fill price from the CLOB API response, not the tracked trader's execution price.
+- **Multi-fill trade coalescing** - Large orders on Polymarket fill against multiple resting orders at different price levels, creating many trade records for a single logical trade. `BotPoll::coalesceTrades()` groups detected trades by (wallet + asset_id + side) within a configurable time window (default 5s via `POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS`), and merges each group into a single `DetectedTrade` with volume-weighted average price and summed size. Uses an "anchor" clustering approach (compare to cluster start, not previous trade) to prevent drift. All individual fills are still marked as "seen" by TradeTracker — coalescing only affects what gets passed to TradeCopier.
+- **Per-wallet exposure cap** - In addition to the per-market cap ($10), a per-wallet cap ($20 via `POLYMARKET_MAX_WALLET_EXPOSURE_USDC`) limits total invested across all positions from a single tracked wallet. Prevents one aggressive trader from dominating the portfolio by making many trades across different markets. Includes pending BUY orders per wallet to avoid overcommitting.
 - **Actual fill price tracking** - `placeOrder()` returns a structured result with the actual execution price. For `matched` orders (immediately filled), the price is derived from the CLOB response's `makingAmount/takingAmount` (BUY: USDC spent ÷ shares received; SELL: USDC received ÷ shares sold). For `live` or `delayed` orders (sitting on orderbook, not yet filled), position updates are deferred via `PendingOrder` — the actual fill price is captured when `bot:check-orders` detects the order has been matched.
 - **Pending order lifecycle** - Orders that don't fill immediately (CLOB status `live` or `delayed`) are tracked in the `pending_orders` table. `bot:check-orders` runs every 30s: polls `GET /order/{id}` for status, applies position updates on fill (with actual fill price), and auto-cancels orders older than 10min (configurable via `POLYMARKET_PENDING_ORDER_TTL_MINUTES`). Trading balance and exposure cap checks include pending BUY order amounts to prevent overcommitting capital. Positions are never updated prematurely — only confirmed fills modify shares/exposure/buy_price. Resolved pending orders are pruned after 7 days.
 - **Market links** - Each position and trade history record stores a `market_slug` (nullable) fetched from the Gamma API on first BUY. The slug is cached 24h in Laravel cache and persisted in DB so dashboard API endpoints make zero external calls. `bot:update-prices` backfills slugs for existing positions (max 5/cycle). The slug is copied from position to trade_history on close. Frontend renders asset IDs as clickable links to `polymarket.com/event/{slug}` when available, with graceful fallback to plain text.
