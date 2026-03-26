@@ -60,6 +60,10 @@ class TradeTracker
      * Newly added wallets (null watermark) are seeded on first poll without
      * returning trades — prevents copying historical trades.
      *
+     * Tiered polling: active wallets (last trade within N days) are polled
+     * every cycle. Inactive wallets are only polled once per hour to reduce
+     * API load.
+     *
      * @return DetectedTrade[]
      */
     public function poll(): array
@@ -74,8 +78,47 @@ class TradeTracker
             return [];
         }
 
-        $wallets = $walletModels->pluck('address')->all();
-        $walletTimestamps = $walletModels->pluck('last_trade_ts', 'address')->all();
+        // Partition into active vs inactive based on last_trade_ts age.
+        $inactiveCutoff = time() - (config('polymarket.inactive_wallet_days', 3) * 86400);
+        $inactivePollInterval = config('polymarket.inactive_poll_interval_seconds', 3600);
+
+        $activeModels = [];
+        $inactiveModels = [];
+
+        foreach ($walletModels as $model) {
+            // Null watermark (new wallet) = always active (needs seeding).
+            if ($model->last_trade_ts === null || $model->last_trade_ts >= $inactiveCutoff) {
+                $activeModels[] = $model;
+            } else {
+                $inactiveModels[] = $model;
+            }
+        }
+
+        // Include inactive wallets only when enough time has elapsed.
+        $lastInactivePoll = (int) BotMeta::getValue('last_inactive_poll_ts', 0);
+        $includeInactive = (time() - $lastInactivePoll) >= $inactivePollInterval;
+
+        $modelsToFetch = $includeInactive
+            ? $walletModels->all()
+            : $activeModels;
+
+        if (empty($modelsToFetch)) {
+            return [];
+        }
+
+        $wallets = array_map(fn ($m) => $m->address, $modelsToFetch);
+        $walletTimestamps = [];
+        foreach ($modelsToFetch as $m) {
+            $walletTimestamps[$m->address] = $m->last_trade_ts;
+        }
+
+        if ($includeInactive && count($inactiveModels) > 0) {
+            BotMeta::setValue('last_inactive_poll_ts', time());
+            Log::info('poll_including_inactive', [
+                'active' => count($activeModels),
+                'inactive' => count($inactiveModels),
+            ]);
+        }
 
         // Fetch trades from all wallets in rate-limited batches.
         $responses = $this->fetchTradesInBatches($wallets);

@@ -19,6 +19,8 @@ return [
     'poll_batch_delay_ms' => (int) env('POLYMARKET_POLL_BATCH_DELAY_MS', 500),
     'trade_coalesce_window_seconds' => (int) env('POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS', 5),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),
+    'inactive_wallet_days' => (int) env('POLYMARKET_INACTIVE_WALLET_DAYS', 3),
+    'inactive_poll_interval_seconds' => (int) env('POLYMARKET_INACTIVE_POLL_INTERVAL_SECONDS', 3600),
     'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
 
     // Auto-pause thresholds — wallet is paused if ANY rule triggers.
