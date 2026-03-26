@@ -4,7 +4,8 @@ RUN apt-get update && apt-get install -y \
     git curl zip unzip libpng-dev libjpeg-dev libfreetype6-dev \
     libonig-dev libxml2-dev libzip-dev libgmp-dev default-mysql-client \
     && docker-php-ext-install pdo pdo_mysql mbstring zip gd pcntl gmp \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && echo "memory_limit=256M" > /usr/local/etc/php/conf.d/memory.ini
 
 # Install Node 20 for Vite
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
