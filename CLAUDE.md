@@ -37,7 +37,7 @@ npm run build                    # Build frontend assets
 
 | Command              | Interval    | Purpose                                      |
 |----------------------|-------------|----------------------------------------------|
-| `bot:poll`           | Every 30s   | Fetch trades from active (non-paused) wallets, copy them |
+| `bot:poll`           | Every 30s   | Fetch trades in rate-limited batches, copy them (~18-20s per cycle) |
 | `bot:update-prices`  | Every 30s   | Update current prices in DB for the dashboard |
 | `bot:check-orders`   | Every 30s   | Poll pending orders for fills, cancel expired (>10min) |
 | `bot:check-resolved` | Every 5 min | Close positions in resolved markets           |
@@ -144,7 +144,7 @@ All trading parameters are configurable via `.env`:
 
 ### Normal Operation (bot running)
 
-1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders. Matched orders update positions immediately; live/delayed orders create PendingOrder records
+1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets in rate-limited batches (default 15 per batch, 500ms delay, with 429 retry). Detects new ones via `SeenTrade` deduplication, applies copy filters, places orders. Poll cycle takes ~18-20s with 264 wallets; `withoutOverlapping` mutex prevents stacking. Matched orders update positions immediately; live/delayed orders create PendingOrder records
 2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Backfills `market_slug` for up to 5 positions per cycle that don't have one yet (via Gamma API, cached 24h). Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 30s** - `bot:check-orders`: Polls CLOB API for pending order status. Filled orders update positions with actual fill price. Orders older than 10min (configurable) are auto-cancelled
 4. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
@@ -189,7 +189,8 @@ All trading parameters are configurable via `.env`:
 - **Wallet pause/stop** - Wallets can be manually paused from the UI or auto-paused by `bot:check-wallets` based on configurable performance thresholds. Paused wallets stop being polled for new trades but existing positions remain open and manageable. Auto-paused wallets show a distinct red "Paused (Auto)" badge vs orange "Paused" for manual. Resuming is always manual via UI.
 - **Wallet discovery** - Top traders auto-discovered hourly from the Polymarket leaderboard API (Data API `/v1/leaderboard`). Filters by PNL and volume thresholds. Max 3 auto-adds per run to prevent flooding. Manual discovery via the Discover tab allows scanning with custom time period/category and one-click adding.
 - **Global pause & close all** - "Pause Bot" button in the header sets `BotMeta::global_paused`. Both `TradeTracker::poll()` and `TradeCopier::copy()` check this flag and skip all work when paused. Pulsing red "BOT PAUSED" badge shown in header. "Close All" button sells every open position at current midpoint with a confirmation dialog. Both buttons are always visible regardless of active tab.
-- **Performance optimizations** - Database indexes on `copied_from_wallet` (positions + trade_history), `opened_at`/`closed_at` (trade_history), and `market_status` (positions). All aggregation uses SQL `GROUP BY` / `SUM` / `COUNT` instead of loading full tables into PHP. `TradeTracker` polls wallets in rate-limited batches (default 15 concurrent per batch, 500ms delay between batches) with automatic 429 retry, and batch-checks/inserts SeenTrade records (chunked at 500). `SeenTrade::prune` uses a cutoff-ID delete instead of loading excess IDs into memory.
+- **Rate-limited polling** - Polymarket's Data API returns HTTP 429 when too many concurrent requests are fired. `TradeTracker` splits wallets into configurable batches (default 15 via `POLYMARKET_POLL_BATCH_SIZE`), fires each batch concurrently via `Http::pool`, then waits a configurable delay (default 500ms via `POLYMARKET_POLL_BATCH_DELAY_MS`) before the next batch. Wallets that receive a 429 are collected and retried once (with 2× delay) after all primary batches complete. `Http::pool` can return `ConnectionException` objects (not `Response`) on timeout — these are handled gracefully as null. A summary log (`poll_batch_summary`) reports total/failed/retried counts per cycle. With 264 wallets, this achieves ~91% success rate (vs ~55-70% with unbatched concurrent requests), at the cost of ~18-20s poll duration (still fits within the 30s interval with `withoutOverlapping` mutex).
+- **Performance optimizations** - Database indexes on `copied_from_wallet` (positions + trade_history), `opened_at`/`closed_at` (trade_history), and `market_status` (positions). All aggregation uses SQL `GROUP BY` / `SUM` / `COUNT` instead of loading full tables into PHP. `TradeTracker` batch-checks/inserts SeenTrade records (chunked at 500). `SeenTrade::prune` uses a cutoff-ID delete instead of loading excess IDs into memory.
 
 ## File Structure
 
