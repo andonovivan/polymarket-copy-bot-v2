@@ -71,8 +71,8 @@ class DashboardController extends Controller
             $realizedStats = $thQuery
                 ->selectRaw('COALESCE(SUM(pnl), 0) as total_realized')
                 ->selectRaw('COUNT(*) as total_trades')
-                ->selectRaw('COALESCE(SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END), 0) as winning_trades')
-                ->selectRaw('COALESCE(SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END), 0) as losing_trades')
+                ->selectRaw('COALESCE(SUM(CASE WHEN pnl >= 0 THEN 1 ELSE 0 END), 0) as winning_trades')
+                ->selectRaw('COALESCE(SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END), 0) as losing_trades')
                 ->first();
 
             $totalRealized = round((float) $realizedStats->total_realized, 4);
