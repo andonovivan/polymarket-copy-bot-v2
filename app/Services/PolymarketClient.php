@@ -297,6 +297,83 @@ class PolymarketClient
     }
 
     /**
+     * Fetch the current status of an order from the CLOB API.
+     *
+     * Returns the parsed JSON response (with 'status', 'makingAmount', 'takingAmount', etc.)
+     * or null on failure.
+     */
+    public function getOrder(string $orderId): ?array
+    {
+        try {
+            $response = Http::withHeaders($this->authHeaders())
+                ->timeout(10)
+                ->get("{$this->clobApiUrl}/order/{$orderId}");
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::warning('get_order_failed', [
+                'order_id' => $orderId,
+                'status' => $response->status(),
+                'body' => substr($response->body(), 0, 200),
+            ]);
+
+            return null;
+        } catch (\Throwable $e) {
+            Log::warning('get_order_failed', [
+                'order_id' => $orderId,
+                'error' => substr($e->getMessage(), 0, 120),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Cancel a resting order on the CLOB.
+     * Returns true if cancellation was acknowledged, false on failure.
+     */
+    public function cancelOrder(string $orderId): bool
+    {
+        try {
+            $response = Http::withHeaders($this->authHeaders())
+                ->timeout(10)
+                ->delete("{$this->clobApiUrl}/order/{$orderId}");
+
+            if ($response->successful()) {
+                Log::info('order_cancelled', ['order_id' => $orderId]);
+
+                return true;
+            }
+
+            Log::warning('cancel_order_failed', [
+                'order_id' => $orderId,
+                'status' => $response->status(),
+                'body' => substr($response->body(), 0, 200),
+            ]);
+
+            return false;
+        } catch (\Throwable $e) {
+            Log::warning('cancel_order_failed', [
+                'order_id' => $orderId,
+                'error' => substr($e->getMessage(), 0, 120),
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * Derive the fill price for a matched order given the CLOB response data and side.
+     * Public so TradeCopier::processPendingOrders() can also use it.
+     */
+    public function deriveFillPriceFromResponse(array $data, string $side, float $fallbackPrice): float
+    {
+        return $this->deriveFillPrice($data, $side, $fallbackPrice);
+    }
+
+    /**
      * Derive the actual fill price from a CLOB order response.
      *
      * For 'matched' orders the CLOB returns makingAmount / takingAmount as

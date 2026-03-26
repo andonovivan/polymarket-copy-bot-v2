@@ -14,6 +14,7 @@ Polymarket Copy Bot v2 is a Laravel application that automatically copies trades
 ./develop art migrate --force    # Run database migrations
 ./develop art bot:poll           # Run one poll cycle manually
 ./develop art bot:update-prices  # Fetch current prices for all positions
+./develop art bot:check-orders   # Poll pending orders, cancel expired ones
 ./develop art bot:check-resolved # Check for resolved markets and close them
 ./develop art bot:discover-wallets # Discover top traders from leaderboard
 ./develop art bot:migrate-from-python /tmp/bot_state.db  # One-time import from Python bot
@@ -38,14 +39,15 @@ npm run build                    # Build frontend assets
 |----------------------|-------------|----------------------------------------------|
 | `bot:poll`           | Every 30s   | Fetch trades from active (non-paused) wallets, copy them |
 | `bot:update-prices`  | Every 30s   | Update current prices in DB for the dashboard |
+| `bot:check-orders`   | Every 30s   | Poll pending orders for fills, cancel expired (>10min) |
 | `bot:check-resolved` | Every 5 min | Close positions in resolved markets           |
 | `bot:check-wallets`  | Every 5 min | Auto-pause wallets with poor performance      |
 | `bot:discover-wallets` | Every hour | Auto-discover top traders from Polymarket leaderboard |
 
 ### Services (`app/Services/`)
 
-- **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active). Also provides `getMarketSlug(tokenId)` to look up the Polymarket market slug for a CLOB token via Gamma API (cached 24h success, 1h failure). `placeOrder()` returns a structured result with `fill_price`, `status`, and `raw` response. For `matched` orders, `fill_price` is derived from `makingAmount/takingAmount`; for `live`/`delayed`/`dry_run` orders, it equals the requested limit price.
-- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes. Fetches and stores `market_slug` on first BUY (post-order, non-blocking), copies it to `trade_history` on close via `recordPnl`. All post-order logic (buy price, exposure, sell P&L) uses the actual `fill_price` from the order response — not the tracked trader's execution price.
+- **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active). Also provides `getMarketSlug(tokenId)` to look up the Polymarket market slug for a CLOB token via Gamma API (cached 24h success, 1h failure). `placeOrder()` returns a structured result with `fill_price`, `status`, and `raw` response. For `matched` orders, `fill_price` is derived from `makingAmount/takingAmount`; for `live`/`delayed`/`dry_run` orders, it equals the requested limit price. `getOrder(orderId)` polls order status; `cancelOrder(orderId)` cancels resting orders.
+- **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes. Fetches and stores `market_slug` on first BUY (post-order, non-blocking), copies it to `trade_history` on close via `recordPnl`. All post-order logic (buy price, exposure, sell P&L) uses the actual `fill_price` from the order response — not the tracked trader's execution price. For `live`/`delayed` orders, position updates are deferred — a `PendingOrder` is created and `processPendingOrders()` resolves it later (fill or cancel after TTL). Extracted `applyBuyFill()`/`applySellFill()` helpers shared by immediate fills and deferred fills. Trading balance and exposure cap checks include pending BUY order amounts to prevent overcommitting.
 - **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets using concurrent HTTP requests (`Http::pool`). Batch-checks and batch-inserts SeenTrade records (chunked at 500) instead of per-trade DB queries. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
 - **WalletScoring** - Computes advanced per-wallet metrics: profit factor, rolling-N expectancy, max drawdown %, consistency, and composite score (0-100). Single-query approach: fetches all trade_history ordered by wallet+closed_at, processes in PHP. Weighted score: Profit Factor 25%, Rolling Expectancy 25%, Win Rate 20%, Max Drawdown 15%, Consistency 15%. Used by both CheckWallets (auto-pause rules 5-6) and WalletReportController (score display).
 - **LeaderboardDiscovery** - Fetches top traders from Polymarket leaderboard API (`/v1/leaderboard`). Filters by min PNL/volume thresholds, skips already-tracked wallets. Used by both the scheduled `bot:discover-wallets` command and `GET/POST /api/discover` endpoints.
@@ -70,6 +72,7 @@ npm run build                    # Build frontend assets
 | `TradeHistory` | Closed trade records (market_slug, buy/sell price, shares, pnl, timestamps) |
 | `PnlSummary`   | Singleton row with aggregate P&L stats                         |
 | `BotMeta`      | Key-value store for bot metadata (last_running_ts, polymarket_balance, trading_balance) |
+| `PendingOrder` | Orders awaiting fill (live/delayed on CLOB orderbook)          |
 | `SeenTrade`    | Transaction hashes of already-processed trades                 |
 
 ### Vue Frontend (`resources/js/`)
@@ -101,6 +104,7 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
 | `POLYMARKET_DRY_RUN`          | true                            | Log only, no real orders             |
+| `POLYMARKET_PENDING_ORDER_TTL_MINUTES` | 10                     | Auto-cancel unfilled orders after N minutes |
 | `POLYMARKET_AUTO_PAUSE_MAX_UNREALIZED_LOSS` | -50              | Unrealized P&L below which wallet is paused (Rule 1) |
 | `POLYMARKET_AUTO_PAUSE_MIN_EXPOSURE` | 100                     | Min invested $ before exposure-loss rule applies (Rule 2) |
 | `POLYMARKET_AUTO_PAUSE_MAX_EXPOSURE_LOSS_RATIO` | 0.20         | Unrealized loss / invested ratio that triggers pause (Rule 2) |
@@ -138,12 +142,13 @@ All trading parameters are configurable via `.env`:
 
 ### Normal Operation (bot running)
 
-1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders
+1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets, detects new ones via `SeenTrade` deduplication, applies copy filters, places orders. Matched orders update positions immediately; live/delayed orders create PendingOrder records
 2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Backfills `market_slug` for up to 5 positions per cycle that don't have one yet (via Gamma API, cached 24h). Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
-3. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
-4. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses if ANY rule triggers: (1) unrealized P&L < -$50, (2) invested > $100 and unrealized loss > 20% of invested, (3) 5+ closed trades with <40% win rate and combined P&L < -$10, (4) 3+ closed trades with zero wins, (5) 20+ trades with negative rolling expectancy, (6) 10+ trades with profit factor < 1.0
-5. **Hourly** - `bot:discover-wallets`: Fetches Polymarket leaderboard, auto-adds up to 3 top traders meeting PNL/volume thresholds (skips already-tracked)
-6. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
+3. **Every 30s** - `bot:check-orders`: Polls CLOB API for pending order status. Filled orders update positions with actual fill price. Orders older than 10min (configurable) are auto-cancelled
+4. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
+5. **Every 5min** - `bot:check-wallets`: Evaluates active wallets and auto-pauses if ANY rule triggers: (1) unrealized P&L < -$50, (2) invested > $100 and unrealized loss > 20% of invested, (3) 5+ closed trades with <40% win rate and combined P&L < -$10, (4) 3+ closed trades with zero wins, (5) 20+ trades with negative rolling expectancy, (6) 10+ trades with profit factor < 1.0
+6. **Hourly** - `bot:discover-wallets`: Fetches Polymarket leaderboard, auto-adds up to 3 top traders meeting PNL/volume thresholds (skips already-tracked)
+7. **Every 10s** - Dashboard auto-refreshes from DB (no API calls)
 
 ### On Startup
 
@@ -161,8 +166,8 @@ All trading parameters are configurable via `.env`:
 6. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)
 7. Exposure cap: skip if would exceed $100 per market
 8. Place order via CLOB API (or log in dry-run mode)
-9. Extract actual fill price from order response (derived from makingAmount/takingAmount for matched orders)
-10. Update position with weighted-average buy price using fill price, fetch market_slug from Gamma API on first buy (post-order, non-blocking), save to DB
+9. If matched/dry-run: extract actual fill price, update position immediately with weighted-average buy price, fetch market_slug
+10. If live/delayed: create PendingOrder record, defer position update. `bot:check-orders` will poll for fill and apply update or auto-cancel after 10min TTL
 
 ## Key Design Decisions
 
@@ -175,7 +180,8 @@ All trading parameters are configurable via `.env`:
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys. Uses the actual fill price from the CLOB API response, not the tracked trader's execution price.
-- **Actual fill price tracking** - `placeOrder()` returns a structured result with the actual execution price. For `matched` orders (immediately filled), the price is derived from the CLOB response's `makingAmount/takingAmount` (BUY: USDC spent ÷ shares received; SELL: USDC received ÷ shares sold). For `live` or `delayed` orders (sitting on orderbook, not yet filled), the requested limit price is used as the best estimate. All post-order logic in TradeCopier (buy price, exposure, sell P&L) uses this fill price.
+- **Actual fill price tracking** - `placeOrder()` returns a structured result with the actual execution price. For `matched` orders (immediately filled), the price is derived from the CLOB response's `makingAmount/takingAmount` (BUY: USDC spent ÷ shares received; SELL: USDC received ÷ shares sold). For `live` or `delayed` orders (sitting on orderbook, not yet filled), position updates are deferred via `PendingOrder` — the actual fill price is captured when `bot:check-orders` detects the order has been matched.
+- **Pending order lifecycle** - Orders that don't fill immediately (CLOB status `live` or `delayed`) are tracked in the `pending_orders` table. `bot:check-orders` runs every 30s: polls `GET /order/{id}` for status, applies position updates on fill (with actual fill price), and auto-cancels orders older than 10min (configurable via `POLYMARKET_PENDING_ORDER_TTL_MINUTES`). Trading balance and exposure cap checks include pending BUY order amounts to prevent overcommitting capital. Positions are never updated prematurely — only confirmed fills modify shares/exposure/buy_price. Resolved pending orders are pruned after 7 days.
 - **Market links** - Each position and trade history record stores a `market_slug` (nullable) fetched from the Gamma API on first BUY. The slug is cached 24h in Laravel cache and persisted in DB so dashboard API endpoints make zero external calls. `bot:update-prices` backfills slugs for existing positions (max 5/cycle). The slug is copied from position to trade_history on close. Frontend renders asset IDs as clickable links to `polymarket.com/event/{slug}` when available, with graceful fallback to plain text.
 - **Market resolution handling** - Resolved markets (no orderbook) are detected and closed with correct payout ($1 for winners, $0 for losers, partial for voided).
 - **Wallet pause/stop** - Wallets can be manually paused from the UI or auto-paused by `bot:check-wallets` based on configurable performance thresholds. Paused wallets stop being polled for new trades but existing positions remain open and manageable. Auto-paused wallets show a distinct red "Paused (Auto)" badge vs orange "Paused" for manual. Resuming is always manual via UI.
@@ -190,6 +196,7 @@ app/
   Console/Commands/
     BotPoll.php              # bot:poll - one poll cycle
     BotReconcile.php         # Startup reconciliation (called from BotPoll)
+    CheckOrders.php          # bot:check-orders - poll pending orders, cancel expired
     CheckResolved.php        # bot:check-resolved - close resolved positions
     CheckWallets.php         # bot:check-wallets - auto-pause poor performers
     DiscoverWallets.php      # bot:discover-wallets - auto-discover top traders
@@ -208,6 +215,7 @@ app/
     WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
   Models/
     BotMeta.php              # Key-value metadata store
+    PendingOrder.php         # Orders awaiting fill on the CLOB orderbook
     PnlSummary.php           # Aggregate P&L singleton
     Position.php             # Open positions
     SeenTrade.php            # Deduplication of processed trades
@@ -221,7 +229,7 @@ app/
     TradeTracker.php         # Wallet polling + trade detection
 config/
   polymarket.php             # All trading configuration
-database/migrations/         # 11 migration files (includes performance indexes, market_slug)
+database/migrations/         # 12 migration files (includes performance indexes, market_slug, pending_orders)
 resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
   Components/

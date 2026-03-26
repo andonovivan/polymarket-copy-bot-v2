@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DTOs\DetectedTrade;
 use App\Models\BotMeta;
+use App\Models\PendingOrder;
 use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Models\TradeHistory;
@@ -92,6 +93,10 @@ class TradeCopier
      * Attempt to replicate a detected trade. Returns true if an order was placed.
      *
      * Filters: sell filter → zero price → size calc → price tolerance → exposure cap → place order.
+     *
+     * For immediately matched orders, the position is updated right away.
+     * For live/delayed orders, a PendingOrder record is created and the position
+     * update is deferred until the order fills (checked by processPendingOrders).
      */
     public function copy(DetectedTrade $trade): bool
     {
@@ -161,19 +166,22 @@ class TradeCopier
         }
 
         // --- Trading balance limit (BUY only) ---
+        // Include pending BUY orders as committed capital to avoid overcommitting.
         if ($trade->side === 'BUY') {
             $tradingBalance = BotMeta::getValue('trading_balance');
             if ($tradingBalance !== null && $tradingBalance !== '') {
                 $tradingBalance = (float) $tradingBalance;
                 $totalInvested = (float) Position::where('shares', '>', 0)->sum(DB::raw('buy_price * shares'));
+                $pendingBuyUsdc = (float) PendingOrder::pending()->where('side', 'BUY')->sum('amount_usdc');
                 // Polymarket-style: realized P&L adjusts available capital.
                 // Profits expand it, losses shrink it.
                 $realizedPnl = (float) PnlSummary::singleton()->total_realized;
-                $available = $tradingBalance - $totalInvested + $realizedPnl;
+                $available = $tradingBalance - $totalInvested - $pendingBuyUsdc + $realizedPnl;
                 if ($tradingBalance > 0 && $tradeAmountUsdc > $available) {
                     Log::warning('trading_balance_exceeded', [
                         'trade_id' => $trade->tradeId,
                         'total_invested' => round($totalInvested, 2),
+                        'pending_buys' => round($pendingBuyUsdc, 2),
                         'realized_pnl' => round($realizedPnl, 2),
                         'available' => round($available, 2),
                         'would_add' => $tradeAmountUsdc,
@@ -186,14 +194,20 @@ class TradeCopier
         }
 
         // --- Exposure cap (BUY only) ---
+        // Include pending BUY orders for this asset to avoid exceeding the cap.
         $position = Position::where('asset_id', $trade->assetId)->first();
         $currentExposure = $position ? (float) $position->exposure : 0.0;
+        $pendingExposure = (float) PendingOrder::pending()
+            ->where('asset_id', $trade->assetId)
+            ->where('side', 'BUY')
+            ->sum('amount_usdc');
 
-        if ($trade->side === 'BUY' && $currentExposure + $tradeAmountUsdc > config('polymarket.max_position_usdc')) {
+        if ($trade->side === 'BUY' && $currentExposure + $pendingExposure + $tradeAmountUsdc > config('polymarket.max_position_usdc')) {
             Log::warning('exposure_cap_reached', [
                 'trade_id' => $trade->tradeId,
                 'asset_id' => $trade->assetId,
                 'current' => $currentExposure,
+                'pending' => $pendingExposure,
                 'would_add' => $tradeAmountUsdc,
                 'cap' => config('polymarket.max_position_usdc'),
             ]);
@@ -207,72 +221,140 @@ class TradeCopier
             return false;
         }
 
-        // Use the actual fill price from the order response instead of the
-        // tracked trader's execution price.  For matched orders this is derived
-        // from makingAmount/takingAmount; for live/dry-run it equals the limit price.
+        $status = $result['status'];
         $fillPrice = (float) $result['fill_price'];
 
-        // --- Post-order state updates ---
-        if ($trade->side === 'BUY') {
-            $position = Position::firstOrNew(['asset_id' => $trade->assetId]);
-            $oldShares = (float) ($position->shares ?? 0);
-            $newShares = $oldShares + $fixedSize;
-            $oldPrice = (float) ($position->buy_price ?? 0);
-
-            $actualCost = $fillPrice * $fixedSize;
-            $position->shares = $newShares;
-            $position->exposure = ($position->exposure ?? 0) + $actualCost;
-            $position->copied_from_wallet = $trade->wallet;
-
-            // Only set opened_at on the first buy.
-            if (! $position->opened_at || $oldShares <= 0) {
-                $position->opened_at = now();
-            }
-
-            // Fetch market slug on first buy (non-blocking — failure is OK).
-            if (! $position->market_slug) {
-                $position->market_slug = $this->client->getMarketSlug($trade->assetId);
-            }
-
-            // Weighted average buy price using our actual fill price.
-            if ($newShares > 0) {
-                $position->buy_price = (($oldPrice * $oldShares) + ($fillPrice * $fixedSize)) / $newShares;
+        // --- Immediately matched or dry-run: update position now ---
+        if ($status === 'matched' || $status === 'dry_run') {
+            if ($trade->side === 'BUY') {
+                $marketSlug = $this->client->getMarketSlug($trade->assetId);
+                $this->applyBuyFill($trade->assetId, $fillPrice, $fixedSize, $trade->wallet, $marketSlug, now());
             } else {
-                $position->buy_price = $fillPrice;
+                $this->applySellFill($trade->assetId, $fillPrice, $fixedSize);
             }
 
-            $position->save();
-        } else {
-            // SELL
-            $position = Position::where('asset_id', $trade->assetId)->first();
-            $buyPrice = $position ? (float) $position->buy_price : 0.0;
+            Log::info('trade_copied', [
+                'trade_id' => $trade->tradeId,
+                'side' => $trade->side,
+                'original_price' => $trade->price,
+                'fill_price' => $fillPrice,
+                'size' => $fixedSize,
+                'status' => $status,
+            ]);
 
-            // Record P&L using our actual sell execution price.
-            $this->recordPnl($trade->assetId, $buyPrice, $fillPrice, $fixedSize);
-
-            if ($position) {
-                $sellValue = $fixedSize * $fillPrice;
-                $position->exposure = max(0, $position->exposure - $sellValue);
-                $position->shares = 0;
-                $position->buy_price = 0;
-                $position->opened_at = null;
-                $position->save();
-            }
+            return true;
         }
 
-        Log::info('trade_copied', [
-            'trade_id' => $trade->tradeId,
+        // --- Live or delayed: defer position update, create PendingOrder ---
+        $orderId = $result['raw']['orderID'] ?? null;
+        if (! $orderId) {
+            Log::error('pending_order_missing_id', [
+                'trade_id' => $trade->tradeId,
+                'result' => $result['raw'],
+            ]);
+
+            return false;
+        }
+
+        PendingOrder::create([
+            'order_id' => $orderId,
+            'asset_id' => $trade->assetId,
             'side' => $trade->side,
-            'original_price' => $trade->price,
-            'fill_price' => $fillPrice,
+            'price' => $trade->price,
             'size' => $fixedSize,
+            'amount_usdc' => $trade->side === 'BUY' ? round($trade->price * $fixedSize, 4) : null,
+            'copied_from_wallet' => $trade->wallet,
+            'market_slug' => null, // Will be fetched when/if the order fills.
+            'status' => $status,
+            'placed_at' => now(),
+        ]);
+
+        Log::info('order_pending', [
+            'trade_id' => $trade->tradeId,
+            'order_id' => $orderId,
+            'side' => $trade->side,
+            'price' => $trade->price,
+            'size' => $fixedSize,
+            'status' => $status,
         ]);
 
         return true;
     }
 
     /**
+     * Poll pending orders for fill status and cancel expired ones.
+     *
+     * Called by the bot:check-orders scheduled command every 30 seconds.
+     *
+     * @return array{filled: int, cancelled: int, pending: int}
+     */
+    public function processPendingOrders(): array
+    {
+        $counts = ['filled' => 0, 'cancelled' => 0, 'pending' => 0];
+
+        $pendingOrders = PendingOrder::pending()->get();
+        if ($pendingOrders->isEmpty()) {
+            return $counts;
+        }
+
+        $ttl = (int) config('polymarket.pending_order_ttl_minutes', 10);
+
+        foreach ($pendingOrders as $pending) {
+            // --- Expired: cancel the order ---
+            if ($pending->isExpired($ttl)) {
+                $this->cancelPendingOrder($pending);
+                $counts['cancelled']++;
+
+                continue;
+            }
+
+            // --- Poll CLOB for current status ---
+            $orderData = $this->client->getOrder($pending->order_id);
+            if ($orderData === null) {
+                // API call failed, retry next cycle.
+                $counts['pending']++;
+
+                continue;
+            }
+
+            $apiStatus = $orderData['status'] ?? '';
+
+            if ($apiStatus === 'matched') {
+                $this->fillPendingOrder($pending, $orderData);
+                $counts['filled']++;
+            } elseif ($apiStatus === 'cancelled') {
+                $pending->update([
+                    'status' => 'cancelled',
+                    'resolved_at' => now(),
+                ]);
+                Log::info('pending_order_cancelled_externally', [
+                    'order_id' => $pending->order_id,
+                    'asset_id' => $pending->asset_id,
+                    'side' => $pending->side,
+                ]);
+                $counts['cancelled']++;
+            } else {
+                // Still live or delayed.
+                $counts['pending']++;
+            }
+        }
+
+        // Prune old resolved records.
+        PendingOrder::prune(7);
+
+        if ($counts['filled'] > 0 || $counts['cancelled'] > 0) {
+            Log::info('pending_orders_processed', $counts);
+        }
+
+        return $counts;
+    }
+
+    /**
      * Manually close a position at the current midpoint.
+     *
+     * If the sell order is immediately matched, the position is closed right away.
+     * If the order goes live/delayed, a PendingOrder is created and the position
+     * remains open until the sell fills.
      */
     public function closePosition(string $assetId): array
     {
@@ -292,28 +374,54 @@ class TradeCopier
             return ['error' => 'Order placement failed'];
         }
 
-        $sellPrice = (float) $result['fill_price'];
-        $buyPrice = (float) $position->buy_price;
-        $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
+        $status = $result['status'];
 
-        $this->recordPnl($assetId, $buyPrice, $sellPrice, $shares);
+        if ($status === 'matched' || $status === 'dry_run') {
+            $sellPrice = (float) $result['fill_price'];
+            $buyPrice = (float) $position->buy_price;
+            $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
 
-        $sellValue = $shares * $sellPrice;
-        $position->exposure = max(0, $position->exposure - $sellValue);
-        $position->shares = 0;
-        $position->buy_price = 0;
-        $position->opened_at = null;
-        $position->save();
+            $this->applySellFill($assetId, $sellPrice, $shares);
 
-        Log::info('position_manually_closed', [
-            'asset_id' => substr($assetId, 0, 16) . '...',
-            'shares' => $shares,
-            'requested_price' => $midpoint,
-            'fill_price' => $sellPrice,
-            'pnl' => $pnl,
+            Log::info('position_manually_closed', [
+                'asset_id' => substr($assetId, 0, 16) . '...',
+                'shares' => $shares,
+                'requested_price' => $midpoint,
+                'fill_price' => $sellPrice,
+                'pnl' => $pnl,
+            ]);
+
+            return ['ok' => true, 'shares' => $shares, 'price' => $sellPrice, 'pnl' => $pnl];
+        }
+
+        // Live/delayed — create PendingOrder, position stays open.
+        $orderId = $result['raw']['orderID'] ?? null;
+        if (! $orderId) {
+            return ['error' => 'Order placed but no order ID returned'];
+        }
+
+        PendingOrder::create([
+            'order_id' => $orderId,
+            'asset_id' => $assetId,
+            'side' => 'SELL',
+            'price' => $midpoint,
+            'size' => $shares,
+            'amount_usdc' => null,
+            'copied_from_wallet' => $position->copied_from_wallet,
+            'market_slug' => $position->market_slug,
+            'status' => $status,
+            'placed_at' => now(),
         ]);
 
-        return ['ok' => true, 'shares' => $shares, 'price' => $sellPrice, 'pnl' => $pnl];
+        Log::info('close_order_pending', [
+            'asset_id' => substr($assetId, 0, 16) . '...',
+            'order_id' => $orderId,
+            'shares' => $shares,
+            'price' => $midpoint,
+            'status' => $status,
+        ]);
+
+        return ['ok' => true, 'pending' => true, 'order_id' => $orderId, 'shares' => $shares, 'price' => $midpoint];
     }
 
     /**
@@ -409,26 +517,178 @@ class TradeCopier
             }
 
             $result = $this->client->placeOrder($position->asset_id, 'SELL', $midpoint, $shares);
-            if ($result !== null) {
+            if ($result === null) {
+                continue;
+            }
+
+            $status = $result['status'];
+
+            if ($status === 'matched' || $status === 'dry_run') {
                 $sellPrice = (float) $result['fill_price'];
-                $buyPrice = (float) $position->buy_price;
-                $this->recordPnl($position->asset_id, $buyPrice, $sellPrice, $shares);
-                $position->exposure = 0;
-                $position->shares = 0;
-                $position->buy_price = 0;
-                $position->opened_at = null;
-                $position->save();
+                $this->applySellFill($position->asset_id, $sellPrice, $shares);
                 Log::info('reconcile_sold', [
                     'asset_id' => substr($position->asset_id, 0, 16) . '...',
                     'shares' => $shares,
                     'requested_price' => $midpoint,
                     'fill_price' => $sellPrice,
                 ]);
+            } else {
+                // Sell order is pending — create PendingOrder, position stays open.
+                $orderId = $result['raw']['orderID'] ?? null;
+                if ($orderId) {
+                    PendingOrder::create([
+                        'order_id' => $orderId,
+                        'asset_id' => $position->asset_id,
+                        'side' => 'SELL',
+                        'price' => $midpoint,
+                        'size' => $shares,
+                        'copied_from_wallet' => $position->copied_from_wallet,
+                        'market_slug' => $position->market_slug,
+                        'status' => $status,
+                        'placed_at' => now(),
+                    ]);
+                    Log::info('reconcile_sell_pending', [
+                        'asset_id' => substr($position->asset_id, 0, 16) . '...',
+                        'order_id' => $orderId,
+                        'shares' => $shares,
+                        'price' => $midpoint,
+                    ]);
+                }
             }
         }
 
         Log::info('reconcile_done');
     }
+
+    // -------------------------------------------------------------------------
+    //  Position update helpers — shared by copy() and processPendingOrders().
+    // -------------------------------------------------------------------------
+
+    /**
+     * Apply a confirmed BUY fill to the position.
+     */
+    private function applyBuyFill(
+        string $assetId,
+        float $fillPrice,
+        float $size,
+        string $wallet,
+        ?string $marketSlug,
+        \DateTimeInterface $openedAt,
+    ): void {
+        $position = Position::firstOrNew(['asset_id' => $assetId]);
+        $oldShares = (float) ($position->shares ?? 0);
+        $newShares = $oldShares + $size;
+        $oldPrice = (float) ($position->buy_price ?? 0);
+
+        $actualCost = $fillPrice * $size;
+        $position->shares = $newShares;
+        $position->exposure = ($position->exposure ?? 0) + $actualCost;
+        $position->copied_from_wallet = $wallet;
+
+        // Only set opened_at on the first buy.
+        if (! $position->opened_at || $oldShares <= 0) {
+            $position->opened_at = $openedAt;
+        }
+
+        // Set market slug if not already known.
+        if (! $position->market_slug && $marketSlug) {
+            $position->market_slug = $marketSlug;
+        }
+
+        // Weighted average buy price using actual fill price.
+        if ($newShares > 0) {
+            $position->buy_price = (($oldPrice * $oldShares) + ($fillPrice * $size)) / $newShares;
+        } else {
+            $position->buy_price = $fillPrice;
+        }
+
+        $position->save();
+    }
+
+    /**
+     * Apply a confirmed SELL fill to the position: record P&L, zero out shares.
+     */
+    private function applySellFill(string $assetId, float $fillPrice, float $size): void
+    {
+        $position = Position::where('asset_id', $assetId)->first();
+        $buyPrice = $position ? (float) $position->buy_price : 0.0;
+
+        $this->recordPnl($assetId, $buyPrice, $fillPrice, $size);
+
+        if ($position) {
+            $sellValue = $size * $fillPrice;
+            $position->exposure = max(0, $position->exposure - $sellValue);
+            $position->shares = 0;
+            $position->buy_price = 0;
+            $position->opened_at = null;
+            $position->save();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  Pending order resolution helpers.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Handle a pending order that has been confirmed as matched by the CLOB API.
+     */
+    private function fillPendingOrder(PendingOrder $pending, array $orderData): void
+    {
+        $fillPrice = $this->client->deriveFillPriceFromResponse($orderData, $pending->side, $pending->price);
+
+        $pending->update([
+            'status' => 'filled',
+            'fill_price' => $fillPrice,
+            'resolved_at' => now(),
+        ]);
+
+        if ($pending->side === 'BUY') {
+            $marketSlug = $this->client->getMarketSlug($pending->asset_id);
+            $this->applyBuyFill(
+                $pending->asset_id,
+                $fillPrice,
+                $pending->size,
+                $pending->copied_from_wallet ?? '',
+                $marketSlug,
+                $pending->placed_at,
+            );
+        } else {
+            $this->applySellFill($pending->asset_id, $fillPrice, $pending->size);
+        }
+
+        Log::info('pending_order_filled', [
+            'order_id' => $pending->order_id,
+            'asset_id' => $pending->asset_id,
+            'side' => $pending->side,
+            'requested_price' => $pending->price,
+            'fill_price' => $fillPrice,
+            'size' => $pending->size,
+        ]);
+    }
+
+    /**
+     * Cancel an expired pending order on the CLOB and mark it as cancelled locally.
+     */
+    private function cancelPendingOrder(PendingOrder $pending): void
+    {
+        $this->client->cancelOrder($pending->order_id);
+
+        $pending->update([
+            'status' => 'cancelled',
+            'resolved_at' => now(),
+        ]);
+
+        Log::info('pending_order_expired_cancelled', [
+            'order_id' => $pending->order_id,
+            'asset_id' => $pending->asset_id,
+            'side' => $pending->side,
+            'age_minutes' => $pending->placed_at->diffInMinutes(now()),
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    //  Private helpers.
+    // -------------------------------------------------------------------------
 
     /**
      * Compute the USDC amount for a BUY trade based on the wallet's composite score
@@ -450,8 +710,9 @@ class TradeCopier
             return $fallback;
         }
         $totalInvested = (float) Position::where('shares', '>', 0)->sum(DB::raw('buy_price * shares'));
+        $pendingBuyUsdc = (float) PendingOrder::pending()->where('side', 'BUY')->sum('amount_usdc');
         $realizedPnl = (float) PnlSummary::singleton()->total_realized;
-        $available = $tradingBalance - $totalInvested + $realizedPnl;
+        $available = $tradingBalance - $totalInvested - $pendingBuyUsdc + $realizedPnl;
 
         if ($available <= 0) {
             return $fallback;

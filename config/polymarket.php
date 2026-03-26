@@ -15,6 +15,7 @@ return [
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),
+    'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
 
     // Auto-pause thresholds — wallet is paused if ANY rule triggers.
     // Rule 1: Deep unrealized loss (absolute).

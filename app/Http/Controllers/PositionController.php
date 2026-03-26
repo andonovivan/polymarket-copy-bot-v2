@@ -101,9 +101,17 @@ class PositionController extends Controller
         }
 
         $result = $copier->closePosition($assetId);
-        $status = isset($result['ok']) ? 200 : 400;
 
-        return response()->json($result, $status);
+        if (isset($result['error'])) {
+            return response()->json($result, 400);
+        }
+
+        // Order may be pending (live/delayed on the CLOB orderbook).
+        if (! empty($result['pending'])) {
+            return response()->json($result, 202);
+        }
+
+        return response()->json($result, 200);
     }
 
     /**
