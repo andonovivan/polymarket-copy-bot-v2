@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BotMeta;
 use App\Models\PnlSummary;
 use App\Models\TrackedWallet;
+use App\Services\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -103,7 +104,7 @@ class DashboardController extends Controller
             'combined_pnl' => round($totalRealized + $totalUnrealized, 4),
             'polymarket_balance' => BotMeta::getValue('polymarket_balance'),
             'trading_balance' => BotMeta::getValue('trading_balance'),
-            'dry_run' => config('polymarket.dry_run'),
+            'dry_run' => Setting::get('dry_run', true),
             'global_paused' => BotMeta::getValue('global_paused') === '1',
             'tracked_wallets' => TrackedWallet::count(),
             'ts' => time(),

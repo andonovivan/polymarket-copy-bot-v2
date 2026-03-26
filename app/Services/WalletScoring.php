@@ -23,7 +23,7 @@ class WalletScoring
 
         $minTrades = (int) config('polymarket.score_min_trades', 5);
         $rollingWindow = (int) config('polymarket.auto_pause_rolling_expectancy_trades', 20);
-        $tradeSize = (float) config('polymarket.fixed_amount_usdc', 2.0);
+        $tradeSize = (float) Setting::get('fixed_amount_usdc', 2.0);
 
         // One query — fetch all closed trades for these wallets, ordered for processing.
         $allTrades = DB::table('trade_history')

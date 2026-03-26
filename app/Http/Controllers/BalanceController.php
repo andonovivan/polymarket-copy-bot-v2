@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotMeta;
+use App\Services\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -28,7 +29,7 @@ class BalanceController extends Controller
         }
 
         // When not in dry-run, trading balance cannot exceed the real Polymarket balance.
-        if (! config('polymarket.dry_run')) {
+        if (! Setting::get('dry_run', true)) {
             $realBalance = BotMeta::getValue('polymarket_balance');
             if ($realBalance !== null && $realBalance !== '') {
                 $realBalance = (float) $realBalance;

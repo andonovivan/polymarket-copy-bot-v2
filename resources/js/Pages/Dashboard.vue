@@ -8,6 +8,7 @@ import TradeHistoryTable from '../Components/TradeHistoryTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
 import WalletReport from '../Components/WalletReport.vue';
 import WalletDiscovery from '../Components/WalletDiscovery.vue';
+import Settings from '../Components/Settings.vue';
 
 const activeTab = ref('dashboard');
 const data = ref(null);         // Unfiltered — used by BalanceBar, header, global buttons.
@@ -206,6 +207,10 @@ function fmtTime(ts) {
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'discover' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
                     Discover
                 </button>
+                <button @click="activeTab = 'settings'"
+                        :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'settings' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
+                    Settings
+                </button>
             </div>
 
             <!-- Dashboard Tab -->
@@ -236,6 +241,12 @@ function fmtTime(ts) {
             <div v-if="activeTab === 'discover'">
                 <h2 class="text-blue-400 text-base mb-3">Discover Top Traders</h2>
                 <WalletDiscovery @refresh="refresh" />
+            </div>
+
+            <!-- Settings Tab -->
+            <div v-if="activeTab === 'settings'">
+                <h2 class="text-blue-400 text-base mb-3">Bot Settings</h2>
+                <Settings />
             </div>
 
             <p class="text-gray-600 text-xs mt-6">Auto-refreshes every 10s</p>

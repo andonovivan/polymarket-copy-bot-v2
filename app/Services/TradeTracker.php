@@ -79,8 +79,8 @@ class TradeTracker
         }
 
         // Partition into active vs inactive based on last_trade_ts age.
-        $inactiveCutoff = time() - (config('polymarket.inactive_wallet_days', 3) * 86400);
-        $inactivePollInterval = config('polymarket.inactive_poll_interval_seconds', 3600);
+        $inactiveCutoff = time() - (Setting::get('inactive_wallet_days', 3) * 86400);
+        $inactivePollInterval = Setting::get('inactive_poll_interval_seconds', 3600);
 
         $activeModels = [];
         $inactiveModels = [];
@@ -233,8 +233,8 @@ class TradeTracker
      */
     private function fetchTradesInBatches(array $wallets): array
     {
-        $batchSize = config('polymarket.poll_batch_size', 15);
-        $delayMs = config('polymarket.poll_batch_delay_ms', 500);
+        $batchSize = Setting::get('poll_batch_size', 15);
+        $delayMs = Setting::get('poll_batch_delay_ms', 500);
         $apiUrl = config('polymarket.data_api_url') . '/trades';
 
         $allResponses = [];

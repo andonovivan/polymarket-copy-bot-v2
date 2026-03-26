@@ -7,6 +7,7 @@ use App\Http\Controllers\GlobalPauseController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\TradeHistoryController;
 use App\Http\Controllers\WalletController;
+use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WalletReportController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,3 +27,6 @@ Route::get('/wallet-report', [WalletReportController::class, 'index']);
 Route::get('/wallet-report/summary', [WalletReportController::class, 'summary']);
 Route::get('/discover', [DiscoverController::class, 'index']);
 Route::post('/discover', [DiscoverController::class, 'store']);
+Route::get('/settings', [SettingsController::class, 'index']);
+Route::put('/settings', [SettingsController::class, 'update']);
+Route::delete('/settings/{key}', [SettingsController::class, 'destroy']);

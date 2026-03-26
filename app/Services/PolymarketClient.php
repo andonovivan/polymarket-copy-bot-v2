@@ -13,7 +13,6 @@ class PolymarketClient
     private string $apiKey;
     private string $apiSecret;
     private string $apiPassphrase;
-    private bool $dryRun;
 
     public function __construct()
     {
@@ -22,7 +21,11 @@ class PolymarketClient
         $this->apiKey = config('polymarket.api_key');
         $this->apiSecret = config('polymarket.api_secret');
         $this->apiPassphrase = config('polymarket.api_passphrase');
-        $this->dryRun = config('polymarket.dry_run');
+    }
+
+    private function isDryRun(): bool
+    {
+        return (bool) Setting::get('dry_run', true);
     }
 
     /**
@@ -230,7 +233,7 @@ class PolymarketClient
      */
     public function placeOrder(string $tokenId, string $side, float $price, float $size): ?array
     {
-        if ($this->dryRun) {
+        if ($this->isDryRun()) {
             Log::info('DRY_RUN_order', [
                 'token_id' => $tokenId,
                 'side' => $side,

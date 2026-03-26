@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\DTOs\DetectedTrade;
 use App\Models\BotMeta;
 use App\Services\PolymarketClient;
+use App\Services\Setting;
 use App\Services\TradeCopier;
 use App\Services\TradeTracker;
 use Illuminate\Console\Command;
@@ -27,11 +28,11 @@ class BotPoll extends Command
 
         if (count($newTrades) > 0) {
             // Balance check (once per cycle).
-            if (config('polymarket.dry_run')) {
+            if (Setting::get('dry_run', true)) {
                 $hasBalance = true;
             } else {
                 $balance = $client->getBalanceUsdc();
-                $fixedAmount = config('polymarket.fixed_amount_usdc');
+                $fixedAmount = Setting::get('fixed_amount_usdc', 2.0);
                 $hasBalance = $balance === null || $balance >= $fixedAmount;
             }
 
@@ -78,7 +79,7 @@ class BotPoll extends Command
             return $trades;
         }
 
-        $windowSeconds = (int) config('polymarket.trade_coalesce_window_seconds', 5);
+        $windowSeconds = (int) Setting::get('trade_coalesce_window_seconds', 5);
         if ($windowSeconds <= 0) {
             return $trades;
         }

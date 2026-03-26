@@ -108,7 +108,7 @@ class TradeCopier
         }
 
         // --- Sell filter ---
-        if ($trade->side === 'SELL' && ! config('polymarket.copy_sells')) {
+        if ($trade->side === 'SELL' && ! Setting::get('copy_sells', true)) {
             Log::info('skipped_sell', ['trade_id' => $trade->tradeId]);
 
             return false;
@@ -116,7 +116,7 @@ class TradeCopier
 
         // --- Minimum price filter ---
         // Skip trades at or near zero (penny bets like 1-2¢ are high-risk lottery tickets).
-        $minPrice = (float) config('polymarket.min_trade_price', 0.05);
+        $minPrice = (float) Setting::get('min_trade_price', 0.05);
         if ($trade->price < $minPrice) {
             Log::info('skipped_below_min_price', [
                 'trade_id' => $trade->tradeId,
@@ -153,7 +153,7 @@ class TradeCopier
         $midpoint = $this->client->getMidpoint($trade->assetId);
         if ($midpoint !== null) {
             $deviation = abs($midpoint - $trade->price);
-            if ($deviation > config('polymarket.price_tolerance')) {
+            if ($deviation > Setting::get('price_tolerance', 0.03)) {
                 Log::warning('price_deviation_too_high', [
                     'trade_id' => $trade->tradeId,
                     'original_price' => $trade->price,
@@ -202,14 +202,14 @@ class TradeCopier
             ->where('side', 'BUY')
             ->sum('amount_usdc');
 
-        if ($trade->side === 'BUY' && $currentExposure + $pendingExposure + $tradeAmountUsdc > config('polymarket.max_position_usdc')) {
+        if ($trade->side === 'BUY' && $currentExposure + $pendingExposure + $tradeAmountUsdc > Setting::get('max_position_usdc', 10.0)) {
             Log::warning('exposure_cap_reached', [
                 'trade_id' => $trade->tradeId,
                 'asset_id' => $trade->assetId,
                 'current' => $currentExposure,
                 'pending' => $pendingExposure,
                 'would_add' => $tradeAmountUsdc,
-                'cap' => config('polymarket.max_position_usdc'),
+                'cap' => Setting::get('max_position_usdc', 10.0),
             ]);
 
             return false;
@@ -217,7 +217,7 @@ class TradeCopier
 
         // --- Per-wallet exposure cap (BUY only) ---
         if ($trade->side === 'BUY') {
-            $maxWalletExposure = (float) config('polymarket.max_wallet_exposure_usdc');
+            $maxWalletExposure = (float) Setting::get('max_wallet_exposure_usdc', 20.0);
             if ($maxWalletExposure > 0) {
                 $walletInvested = (float) Position::where('shares', '>', 0)
                     ->where('copied_from_wallet', $trade->wallet)
@@ -324,7 +324,7 @@ class TradeCopier
             return $counts;
         }
 
-        $ttl = (int) config('polymarket.pending_order_ttl_minutes', 10);
+        $ttl = (int) Setting::get('pending_order_ttl_minutes', 10);
 
         foreach ($pendingOrders as $pending) {
             // --- Expired: cancel the order ---
@@ -718,14 +718,22 @@ class TradeCopier
     // -------------------------------------------------------------------------
 
     /**
-     * Compute the USDC amount for a BUY trade based on the wallet's composite score
-     * and available balance. Uses a hybrid model: % of available balance with min/max caps.
+     * Compute the USDC amount for a BUY trade.
+     *
+     * If fixed_amount_override is set, uses that for all trades (bypasses dynamic sizing).
+     * Otherwise uses the wallet's composite score + available balance hybrid model.
      *
      * Tiers: score 70+ (high), 50-69 (mid), 30-49 (low), <30 or no score (fallback to fixed).
      */
     private function computeTradeAmount(string $walletAddress): float
     {
-        $fallback = (float) config('polymarket.fixed_amount_usdc', 2.0);
+        // Fixed override — bypass all dynamic sizing.
+        $fixedOverride = Setting::get('fixed_amount_override');
+        if ($fixedOverride !== null && $fixedOverride > 0) {
+            return (float) $fixedOverride;
+        }
+
+        $fallback = (float) Setting::get('fixed_amount_usdc', 2.0);
 
         // Compute available balance.
         $tradingBalance = BotMeta::getValue('trading_balance');
@@ -749,7 +757,7 @@ class TradeCopier
         $scores = (new WalletScoring)->compute([$walletAddress]);
         $score = $scores[$walletAddress]['composite_score'] ?? null;
 
-        $sizingMin = (float) config('polymarket.sizing_min', 1.0);
+        $sizingMin = (float) Setting::get('sizing_min', 1.0);
 
         if ($score === null || $score < 30) {
             // No score or very low — use fixed amount as fallback.
@@ -757,14 +765,14 @@ class TradeCopier
         }
 
         if ($score >= 70) {
-            $pct = (float) config('polymarket.sizing_high_pct', 0.50);
-            $max = (float) config('polymarket.sizing_high_max', 10.0);
+            $pct = (float) Setting::get('sizing_high_pct', 0.50);
+            $max = (float) Setting::get('sizing_high_max', 10.0);
         } elseif ($score >= 50) {
-            $pct = (float) config('polymarket.sizing_mid_pct', 0.30);
-            $max = (float) config('polymarket.sizing_mid_max', 5.0);
+            $pct = (float) Setting::get('sizing_mid_pct', 0.30);
+            $max = (float) Setting::get('sizing_mid_max', 5.0);
         } else {
-            $pct = (float) config('polymarket.sizing_low_pct', 0.15);
-            $max = (float) config('polymarket.sizing_low_max', 3.0);
+            $pct = (float) Setting::get('sizing_low_pct', 0.15);
+            $max = (float) Setting::get('sizing_low_max', 3.0);
         }
 
         $amount = $available * ($pct / 100);

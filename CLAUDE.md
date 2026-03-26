@@ -51,6 +51,7 @@ npm run build                    # Build frontend assets
 - **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets. Uses **rate-limited batched requests**: wallets are split into batches (default 15), each batch fires concurrently via `Http::pool`, with configurable delay between batches (default 500ms) to avoid 429 rate limiting. Wallets that receive a 429 are retried once after all primary batches complete. Uses **per-wallet timestamp watermarks** (`last_trade_ts` on `TrackedWallet`) for deduplication — only trades with a timestamp strictly greater than the wallet's watermark are treated as new. Newly added wallets (null watermark) are seeded on first poll: the watermark is set to the highest trade timestamp without copying any trades. **Tiered polling**: wallets with `last_trade_ts` older than N days (default 3 via `POLYMARKET_INACTIVE_WALLET_DAYS`) are considered inactive and only polled once per hour (configurable via `POLYMARKET_INACTIVE_POLL_INTERVAL_SECONDS`). If an inactive wallet trades again, its watermark updates and it automatically returns to the active tier. This significantly reduces API load when many tracked wallets are dormant.
 - **WalletScoring** - Computes advanced per-wallet metrics: profit factor, rolling-N expectancy, max drawdown %, consistency, and composite score (0-100). Single-query approach: fetches all trade_history ordered by wallet+closed_at, processes in PHP. Weighted score: Profit Factor 25%, Rolling Expectancy 25%, Win Rate 20%, Max Drawdown 15%, Consistency 15%. Used by both CheckWallets (auto-pause rules 5-6) and WalletReportController (score display).
 - **LeaderboardDiscovery** - Fetches top traders from Polymarket leaderboard API (`/v1/leaderboard`). Filters by min PNL/volume thresholds, skips already-tracked wallets. Used by both the scheduled `bot:discover-wallets` command and `GET/POST /api/discover` endpoints.
+- **Setting** - Runtime-configurable settings with DB override and env/config fallback. Stores overrides in `BotMeta` with `setting:` key prefix. `Setting::get($key)` checks BotMeta first, falls back to `config('polymarket.{key}')`. Exposes a schema of 21 configurable parameters across 4 groups (sizing, limits, behavior, polling). Includes `fixed_amount_override` — when set, bypasses dynamic sizing and uses a fixed USDC amount for all BUY trades. Used by TradeCopier, TradeTracker, BotPoll, and controllers instead of direct `config()` calls for the exposed settings.
 
 ### Controllers (`app/Http/Controllers/`)
 
@@ -62,6 +63,7 @@ npm run build                    # Build frontend assets
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 - **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
+- **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default.
 
 ### Models (`app/Models/`)
 
@@ -77,7 +79,7 @@ npm run build                    # Build frontend assets
 
 ### Vue Frontend (`resources/js/`)
 
-- **Dashboard.vue** - Main page with four tabs (Dashboard, Wallets, Report, Discover). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data. Global "Pause Bot" and "Close All" buttons in the header, visible on all tabs. Maintains two data refs: `data` (always unfiltered, used by BalanceBar and header) and `statsData` (filtered when filters active, used by StatsCards via `displayData` computed). Both fetched in parallel on refresh. Filter state passed to tables via `tableFilterParams` computed.
+- **Dashboard.vue** - Main page with five tabs (Dashboard, Wallets, Report, Discover, Settings). Uses `v-if` for lazy tab rendering — inactive tabs unmount and stop polling. Auto-refreshes `/api/data` every 10 seconds. Per-tab `refreshTrigger` counters ensure only the active tab's components re-fetch data. Global "Pause Bot" and "Close All" buttons in the header, visible on all tabs. Maintains two data refs: `data` (always unfiltered, used by BalanceBar and header) and `statsData` (filtered when filters active, used by StatsCards via `displayData` computed). Both fetched in parallel on refresh. Filter state passed to tables via `tableFilterParams` computed.
 - **BalanceBar.vue** - Balance management bar above stats cards. Shows Polymarket balance (read-only, N/A in dry-run), editable trading balance limit, available amount (Polymarket-style: limit - invested + realized P&L), and usage progress bar. Always uses unfiltered data — not affected by dashboard filters.
 - **StatsFilter.vue** - Dashboard filter bar with wallet multi-select dropdown (searchable, checkboxes, fetches from `GET /api/wallets`) and time period toggle buttons (1D/1W/1M/All). Emits `change` event with `{ wallets: string[], period: string }`. "Clear filters" link shown when any filter is active. Wallet list refreshes on `refreshTrigger`.
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested. Receives filtered or unfiltered data via `displayData` computed from Dashboard.
@@ -88,6 +90,7 @@ npm run build                    # Build frontend assets
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
 - **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Summary cards fetched independently from `GET /api/wallet-report/summary` (totals across all wallets, not just current page). Composite score column (0-100) with color gradient and hover tooltip showing score breakdown (profit factor, expectancy, win rate, drawdown, consistency). Pause/Resume buttons and win rate coloring.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
+- **Settings.vue** - Bot settings UI with grouped form sections (Trade Sizing, Risk Limits, Trade Behavior, Polling). Each setting shows current value, env default, and "custom" badge when overridden. Boolean settings use toggle switches. "Save Changes" button with dirty-state tracking. Per-field "reset" to revert to env default. Fixed Amount Override toggle at the top of sizing section — when set, bypasses all dynamic sizing logic.
 
 ### Configuration (`config/polymarket.php`)
 
@@ -184,7 +187,8 @@ All trading parameters are configurable via `.env`:
 - **Server-side pagination** - All tables use SQL-level sorting (ORDER BY) and pagination (LIMIT/OFFSET). Positions and trades use Eloquent `paginate()`. Wallet report uses a single query with LEFT JOIN subqueries. Only 10 rows per request instead of full datasets. WalletScoring is computed only for the current page's wallets. Columns not backed by SQL (e.g. composite_score) are marked `sortable: false` in the frontend.
 - **Lazy tab loading** - Dashboard uses `v-if` (not `v-show`) for tab content — inactive tabs unmount completely, stopping their API polling. Each tab has its own `refreshTrigger` counter; only the active tab gets bumped on the 10s interval. On tab switch, the new tab's trigger is bumped so it fetches fresh data immediately. Result: on non-Dashboard tabs, only the lightweight `/api/data` polls (stats + balance); no positions/trades/wallets queries fire.
 - **Trading balance limit** - User-configurable limit stored in `BotMeta`. Uses Polymarket-style accounting: `Available = Limit - Total Invested + Realized P&L`. Profits expand available capital, losses shrink it. BUY trades are skipped when trade amount exceeds available. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
-- **Dynamic position sizing** - Hybrid % of available balance with min/max caps, scaled by wallet composite score. Three tiers: score 70+ (0.5%, max $10), score 50-69 (0.3%, max $5), score 30-49 (0.15%, max $3). All tiers have a $1 floor. Wallets with no score or score <30 use the fixed fallback amount ($2). As available balance grows, trade sizes grow proportionally; as it shrinks, sizes shrink automatically.
+- **Dynamic position sizing** - Hybrid % of available balance with min/max caps, scaled by wallet composite score. Three tiers: score 70+ (0.5%, max $10), score 50-69 (0.3%, max $5), score 30-49 (0.15%, max $3). All tiers have a $1 floor. Wallets with no score or score <30 use the fixed fallback amount ($2). As available balance grows, trade sizes grow proportionally; as it shrinks, sizes shrink automatically. When `fixed_amount_override` is set (via Settings tab), all dynamic sizing is bypassed and every BUY trade uses that fixed USDC amount.
+- **Runtime settings** - Trading parameters (sizing, limits, behavior, polling) are configurable at runtime via the Settings tab without restarting containers. Settings stored in `BotMeta` with `setting:` key prefix. `Setting::get($key)` checks DB override first, falls back to `config('polymarket.{key}')` (which reads `.env`). Clearing a DB override reverts to the env default. All services read settings at call-time (not constructor-time), so changes take effect on the next poll cycle.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
 - **Per-wallet timestamp watermarks** - Each wallet stores `last_trade_ts` (the highest trade timestamp seen). Only trades strictly newer than the watermark are processed. Newly added wallets seed on first poll (watermark set, no trades copied). This replaces the previous `SeenTrade` hash-based dedup which was vulnerable to pruning (50k limit) causing old trades from inactive wallets to be re-detected and copied into already-resolved markets.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys. Uses the actual fill price from the CLOB API response, not the tracked trader's execution price.
@@ -224,6 +228,7 @@ app/
     PositionController.php   # GET /api/positions (paginated) + POST /api/close + POST /api/close-all
     WalletReportController.php # GET /api/wallet-report (paginated)
     TradeHistoryController.php # GET /api/trades (paginated)
+    SettingsController.php   # GET/PUT/DELETE /api/settings - runtime config
     WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
   Models/
     BotMeta.php              # Key-value metadata store
@@ -237,6 +242,7 @@ app/
     LeaderboardDiscovery.php # Leaderboard API + wallet discovery
     WalletScoring.php        # Composite score + advanced metrics per wallet
     PolymarketClient.php     # CLOB/Gamma API integration
+    Setting.php              # Runtime-configurable settings (DB override + env fallback)
     TradeCopier.php          # Trade replication + position management
     TradeTracker.php         # Wallet polling + trade detection
 config/
@@ -252,6 +258,7 @@ resources/js/
     StatsFilter.vue          # Wallet multi-select + time period filter (1D/1W/1M/All)
     PositionsTable.vue       # Open positions (uses DataTable)
     TradeHistoryTable.vue    # Closed trades (uses DataTable)
+    Settings.vue             # Bot settings UI (grouped, with toggle/reset per field)
     WalletDiscovery.vue      # Leaderboard discovery + add wallets
     WalletsManager.vue       # Wallet CRUD UI (client-side pagination)
     WalletReport.vue         # Per-wallet performance report (uses DataTable)
