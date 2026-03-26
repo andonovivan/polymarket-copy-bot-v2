@@ -218,8 +218,15 @@ class PolymarketClient
     }
 
     /**
-     * Place a limit order on the CLOB. Returns the API response array or null on failure.
-     * In dry-run mode, logs the order and returns a stub.
+     * Place a limit order on the CLOB.
+     *
+     * Returns an array with:
+     *   - 'fill_price' (float)  — actual execution price for matched orders, or the
+     *                              requested limit price for live/delayed/dry-run orders.
+     *   - 'status'     (string) — 'matched', 'live', 'delayed', or 'dry_run'.
+     *   - 'raw'        (array)  — the full API response (empty for dry-run).
+     *
+     * Returns null on failure.
      */
     public function placeOrder(string $tokenId, string $side, float $price, float $size): ?array
     {
@@ -232,7 +239,11 @@ class PolymarketClient
                 'cost' => round($price * $size, 4),
             ]);
 
-            return ['dry_run' => true];
+            return [
+                'fill_price' => $price,
+                'status' => 'dry_run',
+                'raw' => [],
+            ];
         }
 
         try {
@@ -242,15 +253,26 @@ class PolymarketClient
                 ->post("{$this->clobApiUrl}/order", $orderPayload);
 
             if ($response->successful()) {
+                $data = $response->json();
+
+                $fillPrice = $this->deriveFillPrice($data, $side, $price);
+                $status = $data['status'] ?? 'unknown';
+
                 Log::info('order_placed', [
                     'token_id' => $tokenId,
                     'side' => $side,
-                    'price' => $price,
+                    'requested_price' => $price,
+                    'fill_price' => $fillPrice,
                     'size' => $size,
-                    'result' => $response->json(),
+                    'status' => $status,
+                    'result' => $data,
                 ]);
 
-                return $response->json();
+                return [
+                    'fill_price' => $fillPrice,
+                    'status' => $status,
+                    'raw' => $data,
+                ];
             }
 
             Log::error('order_failed', [
@@ -272,6 +294,54 @@ class PolymarketClient
 
             return null;
         }
+    }
+
+    /**
+     * Derive the actual fill price from a CLOB order response.
+     *
+     * For 'matched' orders the CLOB returns makingAmount / takingAmount as
+     * fixed-point integers (6 decimals, matching USDC).  The price is:
+     *   BUY  → makingAmount / takingAmount  (USDC spent ÷ shares received)
+     *   SELL → takingAmount / makingAmount  (USDC received ÷ shares sold)
+     *
+     * For 'live' or 'delayed' orders (not yet filled) we fall back to the
+     * limit price we requested.
+     */
+    private function deriveFillPrice(array $data, string $side, float $requestedPrice): float
+    {
+        $status = $data['status'] ?? '';
+
+        if ($status !== 'matched') {
+            if ($status === 'live' || $status === 'delayed') {
+                Log::info('order_not_immediately_matched', [
+                    'status' => $status,
+                    'using_requested_price' => $requestedPrice,
+                ]);
+            }
+
+            return $requestedPrice;
+        }
+
+        $making = (float) ($data['makingAmount'] ?? 0);
+        $taking = (float) ($data['takingAmount'] ?? 0);
+
+        if ($making <= 0 || $taking <= 0) {
+            Log::warning('matched_order_missing_amounts', [
+                'makingAmount' => $data['makingAmount'] ?? null,
+                'takingAmount' => $data['takingAmount'] ?? null,
+                'falling_back_to' => $requestedPrice,
+            ]);
+
+            return $requestedPrice;
+        }
+
+        // BUY: we give USDC (making) and receive shares (taking).
+        // SELL: we give shares (making) and receive USDC (taking).
+        $fillPrice = $side === 'BUY'
+            ? $making / $taking
+            : $taking / $making;
+
+        return round($fillPrice, 6);
     }
 
     /**

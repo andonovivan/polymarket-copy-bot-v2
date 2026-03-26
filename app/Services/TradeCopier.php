@@ -207,6 +207,11 @@ class TradeCopier
             return false;
         }
 
+        // Use the actual fill price from the order response instead of the
+        // tracked trader's execution price.  For matched orders this is derived
+        // from makingAmount/takingAmount; for live/dry-run it equals the limit price.
+        $fillPrice = (float) $result['fill_price'];
+
         // --- Post-order state updates ---
         if ($trade->side === 'BUY') {
             $position = Position::firstOrNew(['asset_id' => $trade->assetId]);
@@ -214,8 +219,9 @@ class TradeCopier
             $newShares = $oldShares + $fixedSize;
             $oldPrice = (float) ($position->buy_price ?? 0);
 
+            $actualCost = $fillPrice * $fixedSize;
             $position->shares = $newShares;
-            $position->exposure = ($position->exposure ?? 0) + $tradeAmountUsdc;
+            $position->exposure = ($position->exposure ?? 0) + $actualCost;
             $position->copied_from_wallet = $trade->wallet;
 
             // Only set opened_at on the first buy.
@@ -228,11 +234,11 @@ class TradeCopier
                 $position->market_slug = $this->client->getMarketSlug($trade->assetId);
             }
 
-            // Weighted average buy price.
+            // Weighted average buy price using our actual fill price.
             if ($newShares > 0) {
-                $position->buy_price = (($oldPrice * $oldShares) + ($trade->price * $fixedSize)) / $newShares;
+                $position->buy_price = (($oldPrice * $oldShares) + ($fillPrice * $fixedSize)) / $newShares;
             } else {
-                $position->buy_price = $trade->price;
+                $position->buy_price = $fillPrice;
             }
 
             $position->save();
@@ -241,10 +247,11 @@ class TradeCopier
             $position = Position::where('asset_id', $trade->assetId)->first();
             $buyPrice = $position ? (float) $position->buy_price : 0.0;
 
-            $this->recordPnl($trade->assetId, $buyPrice, $trade->price, $fixedSize);
+            // Record P&L using our actual sell execution price.
+            $this->recordPnl($trade->assetId, $buyPrice, $fillPrice, $fixedSize);
 
             if ($position) {
-                $sellValue = $fixedSize * $trade->price;
+                $sellValue = $fixedSize * $fillPrice;
                 $position->exposure = max(0, $position->exposure - $sellValue);
                 $position->shares = 0;
                 $position->buy_price = 0;
@@ -256,7 +263,8 @@ class TradeCopier
         Log::info('trade_copied', [
             'trade_id' => $trade->tradeId,
             'side' => $trade->side,
-            'price' => $trade->price,
+            'original_price' => $trade->price,
+            'fill_price' => $fillPrice,
             'size' => $fixedSize,
         ]);
 
@@ -284,12 +292,13 @@ class TradeCopier
             return ['error' => 'Order placement failed'];
         }
 
+        $sellPrice = (float) $result['fill_price'];
         $buyPrice = (float) $position->buy_price;
-        $pnl = round(($midpoint - $buyPrice) * $shares, 4);
+        $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
 
-        $this->recordPnl($assetId, $buyPrice, $midpoint, $shares);
+        $this->recordPnl($assetId, $buyPrice, $sellPrice, $shares);
 
-        $sellValue = $shares * $midpoint;
+        $sellValue = $shares * $sellPrice;
         $position->exposure = max(0, $position->exposure - $sellValue);
         $position->shares = 0;
         $position->buy_price = 0;
@@ -299,11 +308,12 @@ class TradeCopier
         Log::info('position_manually_closed', [
             'asset_id' => substr($assetId, 0, 16) . '...',
             'shares' => $shares,
-            'price' => $midpoint,
+            'requested_price' => $midpoint,
+            'fill_price' => $sellPrice,
             'pnl' => $pnl,
         ]);
 
-        return ['ok' => true, 'shares' => $shares, 'price' => $midpoint, 'pnl' => $pnl];
+        return ['ok' => true, 'shares' => $shares, 'price' => $sellPrice, 'pnl' => $pnl];
     }
 
     /**
@@ -400,8 +410,9 @@ class TradeCopier
 
             $result = $this->client->placeOrder($position->asset_id, 'SELL', $midpoint, $shares);
             if ($result !== null) {
+                $sellPrice = (float) $result['fill_price'];
                 $buyPrice = (float) $position->buy_price;
-                $this->recordPnl($position->asset_id, $buyPrice, $midpoint, $shares);
+                $this->recordPnl($position->asset_id, $buyPrice, $sellPrice, $shares);
                 $position->exposure = 0;
                 $position->shares = 0;
                 $position->buy_price = 0;
@@ -410,7 +421,8 @@ class TradeCopier
                 Log::info('reconcile_sold', [
                     'asset_id' => substr($position->asset_id, 0, 16) . '...',
                     'shares' => $shares,
-                    'price' => $midpoint,
+                    'requested_price' => $midpoint,
+                    'fill_price' => $sellPrice,
                 ]);
             }
         }
