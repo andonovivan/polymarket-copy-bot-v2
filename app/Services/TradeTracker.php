@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\DTOs\DetectedTrade;
 use App\Models\BotMeta;
-use App\Models\SeenTrade;
 use App\Models\TrackedWallet;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -57,10 +56,9 @@ class TradeTracker
 
     /**
      * Poll all tracked wallets and return only new trades.
-     * On the first poll (no seen trades in DB), seeds all existing trade IDs
-     * without returning them — prevents copying old trades.
-     *
-     * Uses concurrent HTTP requests and batch DB operations for efficiency.
+     * Uses per-wallet timestamp watermarks (last_trade_ts) for deduplication.
+     * Newly added wallets (null watermark) are seeded on first poll without
+     * returning trades — prevents copying historical trades.
      *
      * @return DetectedTrade[]
      */
@@ -71,18 +69,22 @@ class TradeTracker
             return [];
         }
 
-        $wallets = TrackedWallet::where('is_paused', false)->pluck('address')->all();
-        if (empty($wallets)) {
+        $walletModels = TrackedWallet::where('is_paused', false)->get(['address', 'last_trade_ts']);
+        if ($walletModels->isEmpty()) {
             return [];
         }
 
-        $seeded = SeenTrade::exists();
+        $wallets = $walletModels->pluck('address')->all();
+        $walletTimestamps = $walletModels->pluck('last_trade_ts', 'address')->all();
 
         // Fetch trades from all wallets in rate-limited batches.
         $responses = $this->fetchTradesInBatches($wallets);
 
-        // Collect all trade IDs from all wallets for a single batch lookup.
-        $allRawTrades = []; // ['wallet' => ..., 'trade' => ..., 'tradeId' => ...]
+        // Process each wallet's trades, filtering by per-wallet timestamp watermark.
+        $newTrades = [];
+        $seenTxInBatch = []; // Dedup within a single poll cycle.
+        $walletMaxTs = [];   // Track max timestamp per wallet for updating watermarks.
+
         foreach ($wallets as $wallet) {
             $response = $responses[$wallet] ?? null;
             if (! $response || ! $response->successful()) {
@@ -97,95 +99,82 @@ class TradeTracker
             }
 
             $trades = $response->json() ?? [];
+            $lastTs = $walletTimestamps[$wallet] ?? null;
+            $needsSeed = $lastTs === null;
+            $maxTs = $lastTs ?? 0;
+
             foreach ($trades as $t) {
                 $tradeId = $t['transactionHash'] ?? '';
+                $ts = (int) ($t['timestamp'] ?? 0);
+
                 if (! $tradeId) {
                     continue;
                 }
-                $allRawTrades[] = [
-                    'wallet' => $wallet,
-                    'trade' => $t,
-                    'tradeId' => $tradeId,
-                ];
+
+                // Track the highest timestamp seen for this wallet.
+                if ($ts > $maxTs) {
+                    $maxTs = $ts;
+                }
+
+                // Skip trades at or before the watermark — already processed.
+                if (! $needsSeed && $ts <= $lastTs) {
+                    continue;
+                }
+
+                // First poll for this wallet: seed watermark only, don't copy.
+                if ($needsSeed) {
+                    continue;
+                }
+
+                // Dedup within a single poll cycle (same tx across multiple wallets).
+                if (isset($seenTxInBatch[$tradeId])) {
+                    continue;
+                }
+                $seenTxInBatch[$tradeId] = true;
+
+                $detected = new DetectedTrade(
+                    tradeId: $tradeId,
+                    wallet: $wallet,
+                    assetId: $t['asset'] ?? '',
+                    side: $t['side'] ?? 'BUY',
+                    price: (float) ($t['price'] ?? 0),
+                    size: (float) ($t['size'] ?? 0),
+                    timestamp: $ts,
+                    raw: $t,
+                );
+
+                $newTrades[] = $detected;
+
+                Log::info('new_trade_detected', [
+                    'wallet' => substr($wallet, 0, 10) . '...',
+                    'side' => $detected->side,
+                    'price' => $detected->price,
+                    'size' => $detected->size,
+                    'asset_id' => substr($detected->assetId, 0, 16) . '...',
+                ]);
+            }
+
+            // Always update the watermark (even for seed runs).
+            if ($maxTs > 0) {
+                $walletMaxTs[$wallet] = $maxTs;
+            }
+
+            if ($needsSeed) {
+                Log::info('wallet_seeded', [
+                    'wallet' => substr($wallet, 0, 10) . '...',
+                    'max_ts' => $maxTs,
+                ]);
             }
         }
 
-        if (empty($allRawTrades)) {
-            return [];
+        // Batch-update watermarks in a single query per wallet.
+        foreach ($walletMaxTs as $address => $maxTs) {
+            TrackedWallet::where('address', $address)
+                ->where(function ($q) use ($maxTs) {
+                    $q->whereNull('last_trade_ts')->orWhere('last_trade_ts', '<', $maxTs);
+                })
+                ->update(['last_trade_ts' => $maxTs]);
         }
-
-        // Batch-check which trade IDs are already seen (chunked to avoid query limits).
-        $allTradeIds = array_unique(array_column($allRawTrades, 'tradeId'));
-        $alreadySeen = [];
-        foreach (array_chunk($allTradeIds, 500) as $chunk) {
-            foreach (SeenTrade::whereIn('transaction_hash', $chunk)->pluck('transaction_hash') as $hash) {
-                $alreadySeen[$hash] = true;
-            }
-        }
-
-        // Filter to only new trades and batch-insert them.
-        $newTradeIds = [];
-        $newTrades = [];
-
-        foreach ($allRawTrades as $entry) {
-            if (isset($alreadySeen[$entry['tradeId']])) {
-                continue;
-            }
-
-            // Avoid duplicates within the same batch (same tx can appear for multiple wallets).
-            if (isset($newTradeIds[$entry['tradeId']])) {
-                continue;
-            }
-            $newTradeIds[$entry['tradeId']] = true;
-
-            // First poll: seed only — don't return trades.
-            if (! $seeded) {
-                continue;
-            }
-
-            $t = $entry['trade'];
-            $detected = new DetectedTrade(
-                tradeId: $entry['tradeId'],
-                wallet: $entry['wallet'],
-                assetId: $t['asset'] ?? '',
-                side: $t['side'] ?? 'BUY',
-                price: (float) ($t['price'] ?? 0),
-                size: (float) ($t['size'] ?? 0),
-                timestamp: (int) ($t['timestamp'] ?? 0),
-                raw: $t,
-            );
-
-            $newTrades[] = $detected;
-
-            Log::info('new_trade_detected', [
-                'wallet' => substr($entry['wallet'], 0, 10) . '...',
-                'side' => $detected->side,
-                'price' => $detected->price,
-                'size' => $detected->size,
-                'asset_id' => substr($detected->assetId, 0, 16) . '...',
-            ]);
-        }
-
-        // Batch-insert all new seen trade IDs (single INSERT with multiple rows).
-        if (! empty($newTradeIds)) {
-            $now = now();
-            $rows = array_map(fn ($hash) => [
-                'transaction_hash' => $hash,
-                'created_at' => $now,
-            ], array_keys($newTradeIds));
-
-            // Insert in chunks to avoid exceeding DB packet limits.
-            foreach (array_chunk($rows, 500) as $chunk) {
-                SeenTrade::insert($chunk);
-            }
-        }
-
-        if (! $seeded) {
-            Log::info('tracker_seeded', ['seen_trade_ids' => SeenTrade::count()]);
-        }
-
-        // Prune to prevent unbounded growth.
-        SeenTrade::prune(50000);
 
         return $newTrades;
     }

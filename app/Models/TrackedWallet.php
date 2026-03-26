@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class TrackedWallet extends Model
 {
-    protected $fillable = ['address', 'name', 'profile_slug', 'is_paused', 'paused_at', 'pause_reason'];
+    protected $fillable = ['address', 'name', 'profile_slug', 'is_paused', 'paused_at', 'pause_reason', 'last_trade_ts'];
 
     protected function casts(): array
     {

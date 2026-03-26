@@ -48,7 +48,7 @@ npm run build                    # Build frontend assets
 
 - **PolymarketClient** - CLOB API wrapper. Handles order placement (EIP-712 signing), midpoint prices, balance checks, and market resolution lookups via Gamma API. Caches prices (15s success, 5min failure) and resolution status (1hr resolved, 5min active). Also provides `getMarketSlug(tokenId)` to look up the Polymarket market slug for a CLOB token via Gamma API (cached 24h success, 1h failure). `placeOrder()` returns a structured result with `fill_price`, `status`, and `raw` response. For `matched` orders, `fill_price` is derived from `makingAmount/takingAmount`; for `live`/`delayed`/`dry_run` orders, it equals the requested limit price. `getOrder(orderId)` polls order status; `cancelOrder(orderId)` cancels resting orders.
 - **TradeCopier** - Core trade replication logic. Applies filters (price tolerance, exposure cap, trading balance limit, sell filter), manages positions with weighted-average buy prices, records P&L, handles startup reconciliation and manual position closes. Fetches and stores `market_slug` on first BUY (post-order, non-blocking), copies it to `trade_history` on close via `recordPnl`. All post-order logic (buy price, exposure, sell P&L) uses the actual `fill_price` from the order response — not the tracked trader's execution price. For `live`/`delayed` orders, position updates are deferred — a `PendingOrder` is created and `processPendingOrders()` resolves it later (fill or cancel after TTL). Extracted `applyBuyFill()`/`applySellFill()` helpers shared by immediate fills and deferred fills. Trading balance and exposure cap checks include pending BUY order amounts to prevent overcommitting.
-- **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets. Uses **rate-limited batched requests**: wallets are split into batches (default 15), each batch fires concurrently via `Http::pool`, with configurable delay between batches (default 500ms) to avoid 429 rate limiting. Wallets that receive a 429 are retried once after all primary batches complete. Batch-checks and batch-inserts SeenTrade records (chunked at 500) instead of per-trade DB queries. Seeds existing trades on first run to avoid copying historical trades. Prunes seen trades at 50k entries.
+- **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets. Uses **rate-limited batched requests**: wallets are split into batches (default 15), each batch fires concurrently via `Http::pool`, with configurable delay between batches (default 500ms) to avoid 429 rate limiting. Wallets that receive a 429 are retried once after all primary batches complete. Uses **per-wallet timestamp watermarks** (`last_trade_ts` on `TrackedWallet`) for deduplication — only trades with a timestamp strictly greater than the wallet's watermark are treated as new. Newly added wallets (null watermark) are seeded on first poll: the watermark is set to the highest trade timestamp without copying any trades. This replaces the previous `SeenTrade` hash-based approach which was vulnerable to pruning evictions causing stale trades to be re-detected.
 - **WalletScoring** - Computes advanced per-wallet metrics: profit factor, rolling-N expectancy, max drawdown %, consistency, and composite score (0-100). Single-query approach: fetches all trade_history ordered by wallet+closed_at, processes in PHP. Weighted score: Profit Factor 25%, Rolling Expectancy 25%, Win Rate 20%, Max Drawdown 15%, Consistency 15%. Used by both CheckWallets (auto-pause rules 5-6) and WalletReportController (score display).
 - **LeaderboardDiscovery** - Fetches top traders from Polymarket leaderboard API (`/v1/leaderboard`). Filters by min PNL/volume thresholds, skips already-tracked wallets. Used by both the scheduled `bot:discover-wallets` command and `GET/POST /api/discover` endpoints.
 
@@ -68,12 +68,12 @@ npm run build                    # Build frontend assets
 | Model          | Purpose                                                        |
 |----------------|----------------------------------------------------------------|
 | `Position`     | Open positions (asset_id, market_slug, shares, buy_price, current_price) |
-| `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug, is_paused, paused_at, pause_reason) |
+| `TrackedWallet`| Wallet addresses being tracked (address, name, profile_slug, is_paused, paused_at, pause_reason, last_trade_ts) |
 | `TradeHistory` | Closed trade records (market_slug, buy/sell price, shares, pnl, timestamps) |
 | `PnlSummary`   | Singleton row with aggregate P&L stats                         |
 | `BotMeta`      | Key-value store for bot metadata (last_running_ts, polymarket_balance, trading_balance) |
 | `PendingOrder` | Orders awaiting fill (live/delayed on CLOB orderbook)          |
-| `SeenTrade`    | Transaction hashes of already-processed trades                 |
+| `SeenTrade`    | Legacy table (replaced by per-wallet `last_trade_ts` watermarks) |
 
 ### Vue Frontend (`resources/js/`)
 
@@ -146,7 +146,7 @@ All trading parameters are configurable via `.env`:
 
 ### Normal Operation (bot running)
 
-1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets in rate-limited batches (default 15 per batch, 500ms delay, with 429 retry). Detects new ones via `SeenTrade` deduplication, applies copy filters, places orders. Poll cycle takes ~18-20s with 264 wallets; `withoutOverlapping` mutex prevents stacking. Matched orders update positions immediately; live/delayed orders create PendingOrder records
+1. **Every 30s** - `bot:poll`: Fetches trades from active (non-paused) tracked wallets in rate-limited batches (default 15 per batch, 500ms delay, with 429 retry). Detects new ones via per-wallet timestamp watermarks (`last_trade_ts`), applies copy filters, places orders. Poll cycle takes ~18-20s with 264 wallets; `withoutOverlapping` mutex prevents stacking. Matched orders update positions immediately; live/delayed orders create PendingOrder records
 2. **Every 30s** - `bot:update-prices`: Fetches midpoints for all open positions concurrently, updates DB. Falls back to resolution check if midpoint fails. Backfills `market_slug` for up to 5 positions per cycle that don't have one yet (via Gamma API, cached 24h). Also caches Polymarket USDC balance in BotMeta (skipped in dry-run)
 3. **Every 30s** - `bot:check-orders`: Polls CLOB API for pending order status. Filled orders update positions with actual fill price. Orders older than 10min (configurable) are auto-cancelled
 4. **Every 5min** - `bot:check-resolved`: Closes positions in resolved markets (WON=$1, LOST=$0, VOIDED=partial)
@@ -156,8 +156,8 @@ All trading parameters are configurable via `.env`:
 
 ### On Startup
 
-1. First `bot:poll` run seeds all existing trade IDs as "seen" (no copies)
-2. Subsequent runs detect only new trades
+1. Newly added wallets have `last_trade_ts = null`. First poll for each wallet sets the watermark to the highest trade timestamp without copying — prevents copying historical trades
+2. Subsequent polls detect only trades with timestamps above the per-wallet watermark
 3. Reconciliation checks if tracked traders sold while bot was offline
 
 ### Trade Copy Pipeline
@@ -184,9 +184,9 @@ All trading parameters are configurable via `.env`:
 - **Trading balance limit** - User-configurable limit stored in `BotMeta`. Uses Polymarket-style accounting: `Available = Limit - Total Invested + Realized P&L`. Profits expand available capital, losses shrink it. BUY trades are skipped when trade amount exceeds available. In dry-run mode, the limit is freely editable. In live mode, it cannot exceed the real Polymarket balance.
 - **Dynamic position sizing** - Hybrid % of available balance with min/max caps, scaled by wallet composite score. Three tiers: score 70+ (0.5%, max $10), score 50-69 (0.3%, max $5), score 30-49 (0.15%, max $3). All tiers have a $1 floor. Wallets with no score or score <30 use the fixed fallback amount ($2). As available balance grows, trade sizes grow proportionally; as it shrinks, sizes shrink automatically.
 - **Dry-run by default** - `POLYMARKET_DRY_RUN=true` prevents accidental real trades. Must explicitly set to `false` for live trading.
-- **First-run seeding** - On first poll, all existing trades are marked as "seen" to prevent copying historical trades.
+- **Per-wallet timestamp watermarks** - Each wallet stores `last_trade_ts` (the highest trade timestamp seen). Only trades strictly newer than the watermark are processed. Newly added wallets seed on first poll (watermark set, no trades copied). This replaces the previous `SeenTrade` hash-based dedup which was vulnerable to pruning (50k limit) causing old trades from inactive wallets to be re-detected and copied into already-resolved markets.
 - **Weighted-average buy price** - When buying the same asset multiple times, the buy price is the weighted average across all buys. Uses the actual fill price from the CLOB API response, not the tracked trader's execution price.
-- **Multi-fill trade coalescing** - Large orders on Polymarket fill against multiple resting orders at different price levels, creating many trade records for a single logical trade. `BotPoll::coalesceTrades()` groups detected trades by (wallet + asset_id + side) within a configurable time window (default 5s via `POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS`), and merges each group into a single `DetectedTrade` with volume-weighted average price and summed size. Uses an "anchor" clustering approach (compare to cluster start, not previous trade) to prevent drift. All individual fills are still marked as "seen" by TradeTracker — coalescing only affects what gets passed to TradeCopier.
+- **Multi-fill trade coalescing** - Large orders on Polymarket fill against multiple resting orders at different price levels, creating many trade records for a single logical trade. `BotPoll::coalesceTrades()` groups detected trades by (wallet + asset_id + side) within a configurable time window (default 5s via `POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS`), and merges each group into a single `DetectedTrade` with volume-weighted average price and summed size. Uses an "anchor" clustering approach (compare to cluster start, not previous trade) to prevent drift. Coalescing only affects what gets passed to TradeCopier — individual fills are filtered by the per-wallet timestamp watermark.
 - **Per-wallet exposure cap** - In addition to the per-market cap ($10), a per-wallet cap ($20 via `POLYMARKET_MAX_WALLET_EXPOSURE_USDC`) limits total invested across all positions from a single tracked wallet. Prevents one aggressive trader from dominating the portfolio by making many trades across different markets. Includes pending BUY orders per wallet to avoid overcommitting.
 - **Actual fill price tracking** - `placeOrder()` returns a structured result with the actual execution price. For `matched` orders (immediately filled), the price is derived from the CLOB response's `makingAmount/takingAmount` (BUY: USDC spent ÷ shares received; SELL: USDC received ÷ shares sold). For `live` or `delayed` orders (sitting on orderbook, not yet filled), position updates are deferred via `PendingOrder` — the actual fill price is captured when `bot:check-orders` detects the order has been matched.
 - **Pending order lifecycle** - Orders that don't fill immediately (CLOB status `live` or `delayed`) are tracked in the `pending_orders` table. `bot:check-orders` runs every 30s: polls `GET /order/{id}` for status, applies position updates on fill (with actual fill price), and auto-cancels orders older than 10min (configurable via `POLYMARKET_PENDING_ORDER_TTL_MINUTES`). Trading balance and exposure cap checks include pending BUY order amounts to prevent overcommitting capital. Positions are never updated prematurely — only confirmed fills modify shares/exposure/buy_price. Resolved pending orders are pruned after 7 days.
@@ -196,7 +196,7 @@ All trading parameters are configurable via `.env`:
 - **Wallet discovery** - Top traders auto-discovered hourly from the Polymarket leaderboard API (Data API `/v1/leaderboard`). Filters by PNL and volume thresholds. Max 3 auto-adds per run to prevent flooding. Manual discovery via the Discover tab allows scanning with custom time period/category and one-click adding.
 - **Global pause & close all** - "Pause Bot" button in the header sets `BotMeta::global_paused`. Both `TradeTracker::poll()` and `TradeCopier::copy()` check this flag and skip all work when paused. Pulsing red "BOT PAUSED" badge shown in header. "Close All" button sells every open position at current midpoint with a confirmation dialog. Both buttons are always visible regardless of active tab.
 - **Rate-limited polling** - Polymarket's Data API returns HTTP 429 when too many concurrent requests are fired. `TradeTracker` splits wallets into configurable batches (default 15 via `POLYMARKET_POLL_BATCH_SIZE`), fires each batch concurrently via `Http::pool`, then waits a configurable delay (default 500ms via `POLYMARKET_POLL_BATCH_DELAY_MS`) before the next batch. Wallets that receive a 429 are collected and retried once (with 2× delay) after all primary batches complete. `Http::pool` can return `ConnectionException` objects (not `Response`) on timeout — these are handled gracefully as null. A summary log (`poll_batch_summary`) reports total/failed/retried counts per cycle. With 264 wallets, this achieves ~91% success rate (vs ~55-70% with unbatched concurrent requests), at the cost of ~18-20s poll duration (still fits within the 30s interval with `withoutOverlapping` mutex).
-- **Performance optimizations** - Database indexes on `copied_from_wallet` (positions + trade_history), `opened_at`/`closed_at` (trade_history), and `market_status` (positions). All aggregation uses SQL `GROUP BY` / `SUM` / `COUNT` instead of loading full tables into PHP. `TradeTracker` batch-checks/inserts SeenTrade records (chunked at 500). `SeenTrade::prune` uses a cutoff-ID delete instead of loading excess IDs into memory.
+- **Performance optimizations** - Database indexes on `copied_from_wallet` (positions + trade_history), `opened_at`/`closed_at` (trade_history), and `market_status` (positions). All aggregation uses SQL `GROUP BY` / `SUM` / `COUNT` instead of loading full tables into PHP. `TradeTracker` uses per-wallet timestamp watermarks for O(1) dedup (no hash table lookups or DB queries per trade).
 
 ## File Structure
 
@@ -227,8 +227,8 @@ app/
     PendingOrder.php         # Orders awaiting fill on the CLOB orderbook
     PnlSummary.php           # Aggregate P&L singleton
     Position.php             # Open positions
-    SeenTrade.php            # Deduplication of processed trades
-    TrackedWallet.php        # Tracked wallet addresses (with pause state)
+    SeenTrade.php            # Legacy deduplication table (replaced by per-wallet timestamp watermarks)
+    TrackedWallet.php        # Tracked wallet addresses (with pause state + last_trade_ts watermark)
     TradeHistory.php         # Closed trade records
   Services/
     LeaderboardDiscovery.php # Leaderboard API + wallet discovery
@@ -238,7 +238,7 @@ app/
     TradeTracker.php         # Wallet polling + trade detection
 config/
   polymarket.php             # All trading configuration
-database/migrations/         # 12 migration files (includes performance indexes, market_slug, pending_orders)
+database/migrations/         # 13 migration files (includes performance indexes, market_slug, pending_orders, last_trade_ts)
 resources/js/
   Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
   Components/
