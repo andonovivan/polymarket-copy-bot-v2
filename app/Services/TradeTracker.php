@@ -6,6 +6,7 @@ use App\DTOs\DetectedTrade;
 use App\Models\BotMeta;
 use App\Models\SeenTrade;
 use App\Models\TrackedWallet;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -77,17 +78,8 @@ class TradeTracker
 
         $seeded = SeenTrade::exists();
 
-        // Fetch trades from all wallets concurrently.
-        $responses = Http::pool(function ($pool) use ($wallets) {
-            foreach ($wallets as $wallet) {
-                $pool->as($wallet)
-                    ->timeout(15)
-                    ->get(config('polymarket.data_api_url') . '/trades', [
-                        'user' => $wallet,
-                        'limit' => self::POLL_LIMIT,
-                    ]);
-            }
-        });
+        // Fetch trades from all wallets in rate-limited batches.
+        $responses = $this->fetchTradesInBatches($wallets);
 
         // Collect all trade IDs from all wallets for a single batch lookup.
         $allRawTrades = []; // ['wallet' => ..., 'trade' => ..., 'tradeId' => ...]
@@ -196,5 +188,105 @@ class TradeTracker
         SeenTrade::prune(50000);
 
         return $newTrades;
+    }
+
+    /**
+     * Fetch trades from all wallets using batched concurrent requests
+     * with inter-batch delays to avoid 429 rate limiting.
+     *
+     * Wallets that receive a 429 response are retried once after all
+     * primary batches complete.
+     *
+     * @return array<string, \Illuminate\Http\Client\Response|null>
+     */
+    private function fetchTradesInBatches(array $wallets): array
+    {
+        $batchSize = config('polymarket.poll_batch_size', 15);
+        $delayMs = config('polymarket.poll_batch_delay_ms', 500);
+        $apiUrl = config('polymarket.data_api_url') . '/trades';
+
+        $allResponses = [];
+        $retryWallets = [];
+        $batches = array_chunk($wallets, $batchSize);
+
+        foreach ($batches as $batchIndex => $batch) {
+            // Delay between batches (not before the first one).
+            if ($batchIndex > 0 && $delayMs > 0) {
+                usleep($delayMs * 1000);
+            }
+
+            $responses = Http::pool(function ($pool) use ($batch, $apiUrl) {
+                foreach ($batch as $wallet) {
+                    $pool->as($wallet)
+                        ->timeout(15)
+                        ->get($apiUrl, [
+                            'user' => $wallet,
+                            'limit' => self::POLL_LIMIT,
+                        ]);
+                }
+            });
+
+            foreach ($batch as $wallet) {
+                $response = $responses[$wallet] ?? null;
+
+                // Http::pool returns ConnectionException on timeout/failure — skip those.
+                if (! $response instanceof Response) {
+                    $allResponses[$wallet] = null;
+
+                    continue;
+                }
+
+                if ($response->status() === 429) {
+                    $retryWallets[] = $wallet;
+
+                    continue;
+                }
+
+                $allResponses[$wallet] = $response;
+            }
+        }
+
+        // Retry 429'd wallets once after a longer delay.
+        if (! empty($retryWallets)) {
+            Log::info('poll_retrying_429', ['count' => count($retryWallets)]);
+
+            usleep($delayMs * 1000 * 2); // Double delay before retry pass.
+
+            $retryBatches = array_chunk($retryWallets, $batchSize);
+
+            foreach ($retryBatches as $batchIndex => $batch) {
+                if ($batchIndex > 0 && $delayMs > 0) {
+                    usleep($delayMs * 1000);
+                }
+
+                $responses = Http::pool(function ($pool) use ($batch, $apiUrl) {
+                    foreach ($batch as $wallet) {
+                        $pool->as($wallet)
+                            ->timeout(15)
+                            ->get($apiUrl, [
+                                'user' => $wallet,
+                                'limit' => self::POLL_LIMIT,
+                            ]);
+                    }
+                });
+
+                foreach ($batch as $wallet) {
+                    $response = $responses[$wallet] ?? null;
+                    $allResponses[$wallet] = ($response instanceof Response) ? $response : null;
+                }
+            }
+        }
+
+        // Summary log when there are failures (after retries).
+        $failedCount = count(array_filter($allResponses, fn ($r) => $r === null || ! $r->successful()));
+        if ($failedCount > 0) {
+            Log::warning('poll_batch_summary', [
+                'total' => count($wallets),
+                'failed_after_retry' => $failedCount,
+                'retried' => count($retryWallets),
+            ]);
+        }
+
+        return $allResponses;
     }
 }

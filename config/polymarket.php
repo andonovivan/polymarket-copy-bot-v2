@@ -14,6 +14,8 @@ return [
     'min_trade_price' => (float) env('POLYMARKET_MIN_TRADE_PRICE', 0.05),
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
+    'poll_batch_size' => (int) env('POLYMARKET_POLL_BATCH_SIZE', 15),
+    'poll_batch_delay_ms' => (int) env('POLYMARKET_POLL_BATCH_DELAY_MS', 500),
     'dry_run' => env('POLYMARKET_DRY_RUN', true),
     'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
 
