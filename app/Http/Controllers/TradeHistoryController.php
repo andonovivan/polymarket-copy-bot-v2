@@ -66,6 +66,9 @@ class TradeHistoryController extends Controller
             return [
                 'asset_id' => $t->asset_id,
                 'market_slug' => $t->market_slug,
+                'market_question' => $t->market_question,
+                'market_image' => $t->market_image,
+                'outcome' => $t->outcome,
                 'buy_price' => (float) $t->buy_price,
                 'sell_price' => (float) $t->sell_price,
                 'shares' => (float) $t->shares,

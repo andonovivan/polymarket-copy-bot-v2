@@ -184,12 +184,22 @@ class PolymarketClient
     }
 
     /**
-     * Look up the market slug for a CLOB token ID via the Gamma API.
-     * Cached for 24 hours (slugs don't change).
+     * Thin wrapper — returns just the slug from getMarketMetadata().
      */
     public function getMarketSlug(string $tokenId): ?string
     {
-        $cacheKey = "market_slug:{$tokenId}";
+        return $this->getMarketMetadata($tokenId)['slug'] ?? null;
+    }
+
+    /**
+     * Get full market metadata for a CLOB token: slug, question, image, outcome.
+     * Cached 24h on success, 1h on failure. Single Gamma API call.
+     *
+     * @return array{slug: string, question: string, image: string|null, outcome: string}|null
+     */
+    public function getMarketMetadata(string $tokenId): ?array
+    {
+        $cacheKey = "market_meta:{$tokenId}";
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
             return $cached === 'UNKNOWN' ? null : $cached;
@@ -203,16 +213,43 @@ class PolymarketClient
 
             if ($response->successful()) {
                 $markets = $response->json();
-                if (!empty($markets) && is_array($markets)) {
-                    // Prefer the event slug (parent market) — that's what Polymarket URLs use.
-                    // Fall back to market-level slug if no event is attached.
-                    $slug = $markets[0]['events'][0]['slug']
-                         ?? $markets[0]['slug']
-                         ?? null;
-                    if ($slug) {
-                        Cache::put($cacheKey, $slug, 86400);
-                        return $slug;
+                if (! empty($markets) && is_array($markets)) {
+                    $market = $markets[0];
+                    $event = $market['events'][0] ?? null;
+
+                    // Prefer event slug (parent market) — that's what Polymarket URLs use.
+                    $slug = $event['slug'] ?? $market['slug'] ?? null;
+                    if (! $slug) {
+                        Cache::put($cacheKey, 'UNKNOWN', 3600);
+                        return null;
                     }
+
+                    // Market question text.
+                    $question = $market['question'] ?? $event['title'] ?? null;
+
+                    // Image: prefer event image, fall back to market image.
+                    $image = $event['image'] ?? $market['image'] ?? $market['icon'] ?? null;
+
+                    // Determine which outcome this token represents (Yes/No/custom).
+                    $outcome = null;
+                    $tokenIds = json_decode($market['clobTokenIds'] ?? '[]', true);
+                    $outcomes = json_decode($market['outcomes'] ?? '[]', true);
+                    if (is_array($tokenIds) && is_array($outcomes)) {
+                        $idx = array_search($tokenId, $tokenIds);
+                        if ($idx !== false && isset($outcomes[$idx])) {
+                            $outcome = $outcomes[$idx];
+                        }
+                    }
+
+                    $meta = [
+                        'slug' => $slug,
+                        'question' => $question,
+                        'image' => $image,
+                        'outcome' => $outcome,
+                    ];
+
+                    Cache::put($cacheKey, $meta, 86400);
+                    return $meta;
                 }
             }
 

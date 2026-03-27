@@ -78,16 +78,31 @@ class UpdatePrices extends Command
             }
         }
 
-        // Backfill market_slug for positions that don't have one yet (max 5 per cycle).
-        $missingSlug = Position::where('shares', '>', 0)
-            ->whereNull('market_slug')
+        // Backfill market metadata for positions missing any field (max 5 per cycle).
+        $missingMeta = Position::where('shares', '>', 0)
+            ->where(function ($q) {
+                $q->whereNull('market_slug')
+                  ->orWhereNull('market_question')
+                  ->orWhereNull('outcome');
+            })
             ->limit(5)
             ->get();
 
-        foreach ($missingSlug as $pos) {
-            $slug = $client->getMarketSlug($pos->asset_id);
-            if ($slug) {
-                $pos->market_slug = $slug;
+        foreach ($missingMeta as $pos) {
+            $meta = $client->getMarketMetadata($pos->asset_id);
+            if ($meta) {
+                if (! $pos->market_slug && ($meta['slug'] ?? null)) {
+                    $pos->market_slug = $meta['slug'];
+                }
+                if (! $pos->market_question && ($meta['question'] ?? null)) {
+                    $pos->market_question = $meta['question'];
+                }
+                if (! $pos->market_image && ($meta['image'] ?? null)) {
+                    $pos->market_image = $meta['image'];
+                }
+                if (! $pos->outcome && ($meta['outcome'] ?? null)) {
+                    $pos->outcome = $meta['outcome'];
+                }
                 $pos->save();
             }
         }

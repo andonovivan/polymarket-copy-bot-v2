@@ -11,6 +11,9 @@ class TradeHistory extends Model
     protected $fillable = [
         'asset_id',
         'market_slug',
+        'market_question',
+        'market_image',
+        'outcome',
         'copied_from_wallet',
         'buy_price',
         'sell_price',

@@ -254,8 +254,8 @@ class TradeCopier
         // --- Immediately matched or dry-run: update position now ---
         if ($status === 'matched' || $status === 'dry_run') {
             if ($trade->side === 'BUY') {
-                $marketSlug = $this->client->getMarketSlug($trade->assetId);
-                $this->applyBuyFill($trade->assetId, $fillPrice, $fixedSize, $trade->wallet, $marketSlug, now());
+                $marketMeta = $this->client->getMarketMetadata($trade->assetId);
+                $this->applyBuyFill($trade->assetId, $fillPrice, $fixedSize, $trade->wallet, $marketMeta, now());
             } else {
                 $this->applySellFill($trade->assetId, $fillPrice, $fixedSize);
             }
@@ -599,7 +599,7 @@ class TradeCopier
         float $fillPrice,
         float $size,
         string $wallet,
-        ?string $marketSlug,
+        ?array $marketMeta,
         \DateTimeInterface $openedAt,
     ): void {
         $position = Position::firstOrNew(['asset_id' => $assetId]);
@@ -617,9 +617,20 @@ class TradeCopier
             $position->opened_at = $openedAt;
         }
 
-        // Set market slug if not already known.
-        if (! $position->market_slug && $marketSlug) {
-            $position->market_slug = $marketSlug;
+        // Set market metadata if not already known.
+        if ($marketMeta) {
+            if (! $position->market_slug && ($marketMeta['slug'] ?? null)) {
+                $position->market_slug = $marketMeta['slug'];
+            }
+            if (! $position->market_question && ($marketMeta['question'] ?? null)) {
+                $position->market_question = $marketMeta['question'];
+            }
+            if (! $position->market_image && ($marketMeta['image'] ?? null)) {
+                $position->market_image = $marketMeta['image'];
+            }
+            if (! $position->outcome && ($marketMeta['outcome'] ?? null)) {
+                $position->outcome = $marketMeta['outcome'];
+            }
         }
 
         // Weighted average buy price using actual fill price.
@@ -670,13 +681,13 @@ class TradeCopier
         ]);
 
         if ($pending->side === 'BUY') {
-            $marketSlug = $this->client->getMarketSlug($pending->asset_id);
+            $marketMeta = $this->client->getMarketMetadata($pending->asset_id);
             $this->applyBuyFill(
                 $pending->asset_id,
                 $fillPrice,
                 $pending->size,
                 $pending->copied_from_wallet ?? '',
-                $marketSlug,
+                $marketMeta,
                 $pending->placed_at,
             );
         } else {
@@ -809,16 +820,18 @@ class TradeCopier
         $summary->updated_at = now();
         $summary->save();
 
-        // Get opened_at, copied_from_wallet, and market_slug from the position.
+        // Get metadata from the position to copy into trade history.
         $position = Position::where('asset_id', $assetId)->first();
         $openedAt = $position?->opened_at;
         $copiedFromWallet = $position?->copied_from_wallet;
-        $marketSlug = $position?->market_slug;
 
         // Create history record.
         TradeHistory::create([
             'asset_id' => $assetId,
-            'market_slug' => $marketSlug,
+            'market_slug' => $position?->market_slug,
+            'market_question' => $position?->market_question,
+            'market_image' => $position?->market_image,
+            'outcome' => $position?->outcome,
             'copied_from_wallet' => $copiedFromWallet,
             'buy_price' => $buyPrice,
             'sell_price' => $sellPrice,

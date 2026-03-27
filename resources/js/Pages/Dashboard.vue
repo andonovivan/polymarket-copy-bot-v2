@@ -3,8 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import BalanceBar from '../Components/BalanceBar.vue';
 import StatsCards from '../Components/StatsCards.vue';
 import StatsFilter from '../Components/StatsFilter.vue';
-import PositionsTable from '../Components/PositionsTable.vue';
-import TradeHistoryTable from '../Components/TradeHistoryTable.vue';
+import ActivityTable from '../Components/ActivityTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
 import WalletReport from '../Components/WalletReport.vue';
 import WalletDiscovery from '../Components/WalletDiscovery.vue';
@@ -219,11 +218,9 @@ function fmtTime(ts) {
                 <StatsFilter :refreshTrigger="dashboardRefresh" @change="onFilterChange" />
                 <StatsCards v-if="displayData" :data="displayData" />
 
-                <h2 class="text-blue-400 text-base mt-5 mb-3">Open Positions</h2>
-                <PositionsTable :refreshTrigger="dashboardRefresh" :filters="tableFilterParams" @refresh="refresh" />
-
-                <h2 class="text-blue-400 text-base mt-5 mb-3">Recent Closed Trades</h2>
-                <TradeHistoryTable :refreshTrigger="dashboardRefresh" :filters="tableFilterParams" />
+                <div class="mt-5">
+                    <ActivityTable :refreshTrigger="dashboardRefresh" :filters="tableFilterParams" @refresh="refresh" />
+                </div>
             </div>
 
             <!-- Wallets Tab -->
