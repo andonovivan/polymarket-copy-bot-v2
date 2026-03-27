@@ -2,6 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BotMeta;
+use App\Models\PendingOrder;
+use App\Models\PnlSummary;
+use App\Models\Position;
+use App\Models\SeenTrade;
+use App\Models\TrackedWallet;
+use App\Models\TradeHistory;
 use App\Services\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -90,6 +97,33 @@ class SettingsController extends Controller
             'ok' => true,
             'settings' => Setting::all(),
         ]);
+    }
+
+    /**
+     * POST /api/reset-data — Reset all data except tracked wallets.
+     */
+    public function resetData(): JsonResponse
+    {
+        Position::truncate();
+        TradeHistory::truncate();
+        PendingOrder::truncate();
+        SeenTrade::truncate();
+
+        // Reset PnlSummary singleton.
+        PnlSummary::query()->update([
+            'total_realized' => 0,
+            'total_trades' => 0,
+            'winning_trades' => 0,
+            'losing_trades' => 0,
+        ]);
+
+        // Clear runtime BotMeta keys (not setting: prefixed ones).
+        BotMeta::whereNotLike('key', 'setting:%')->delete();
+
+        // Reset last_trade_ts on all wallets so they get re-seeded.
+        TrackedWallet::query()->update(['last_trade_ts' => null]);
+
+        return response()->json(['ok' => true]);
     }
 
     private function validate_setting(string $key, mixed $value, array $schema): ?string

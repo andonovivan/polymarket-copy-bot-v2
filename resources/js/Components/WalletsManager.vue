@@ -19,11 +19,14 @@ const editName = ref('');
 const editSlug = ref('');
 const wallets = ref([]);
 const loading = ref(true);
+const selected = ref(new Set());
 let msgTimeout = null;
 
 const paged = computed(() => wallets.value.slice(page.value * perPage.value, (page.value + 1) * perPage.value));
 const totalPages = computed(() => Math.max(1, Math.ceil(wallets.value.length / perPage.value)));
 const offset = computed(() => page.value * perPage.value);
+const allPageSelected = computed(() => paged.value.length > 0 && paged.value.every(w => selected.value.has(w.address)));
+const hasSelected = computed(() => selected.value.size > 0);
 
 function changePerPage(size) {
     perPage.value = size;
@@ -92,6 +95,9 @@ async function removeWallet(addr) {
         });
         const d = await r.json();
         if (d.error) { showMsg(d.error, true); return; }
+        const s = new Set(selected.value);
+        s.delete(addr);
+        selected.value = s;
         showMsg('Removed ' + addr.slice(0, 8) + '...', false);
         emit('refresh');
         fetchWallets();
@@ -141,6 +147,40 @@ async function togglePause(addr, paused) {
         emit('refresh');
         fetchWallets();
     } catch(e) { showMsg('Failed to toggle pause', true); }
+}
+
+function toggleSelect(addr) {
+    const s = new Set(selected.value);
+    if (s.has(addr)) s.delete(addr); else s.add(addr);
+    selected.value = s;
+}
+
+function toggleSelectAll() {
+    const s = new Set(selected.value);
+    if (allPageSelected.value) {
+        paged.value.forEach(w => s.delete(w.address));
+    } else {
+        paged.value.forEach(w => s.add(w.address));
+    }
+    selected.value = s;
+}
+
+async function bulkDelete() {
+    const count = selected.value.size;
+    if (!confirm(`Delete ${count} selected wallet${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    try {
+        const r = await fetch('/api/wallets/bulk', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ wallets: [...selected.value] }),
+        });
+        const d = await r.json();
+        if (d.error) { showMsg(d.error, true); return; }
+        selected.value = new Set();
+        showMsg(`Deleted ${d.deleted} wallet${d.deleted !== 1 ? 's' : ''}`, false);
+        emit('refresh');
+        fetchWallets();
+    } catch(e) { showMsg('Failed to bulk delete', true); }
 }
 
 function pauseLabel(w) {
@@ -201,17 +241,33 @@ function profileUrl(w) {
         </div>
 
         <template v-else>
-            <div class="text-gray-500 text-sm mb-3" v-if="wallets.length > 0">
-                {{ wallets.length }} wallet{{ wallets.length !== 1 ? 's' : '' }} tracked
+            <div class="flex items-center justify-between mb-3" v-if="wallets.length > 0">
+                <span class="text-gray-500 text-sm">
+                    {{ wallets.length }} wallet{{ wallets.length !== 1 ? 's' : '' }} tracked
+                    <span v-if="hasSelected" class="text-yellow-500 ml-2">({{ selected.size }} selected)</span>
+                </span>
+                <button v-if="hasSelected" @click="bulkDelete"
+                        class="bg-red-700 hover:bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
+                    Delete Selected ({{ selected.size }})
+                </button>
+            </div>
+
+            <div v-if="wallets.length > 0" class="flex items-center gap-2 mb-2 px-1">
+                <input type="checkbox" :checked="allPageSelected" @change="toggleSelectAll"
+                       class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-0 cursor-pointer">
+                <span class="text-gray-600 text-xs">Select all on page</span>
             </div>
 
             <ul v-if="wallets.length > 0">
                 <li v-for="(w, i) in paged" :key="w.address"
-                    class="bg-gray-900 border border-gray-700 rounded-md px-4 py-3 mb-2">
+                    :class="['bg-gray-900 border rounded-md px-4 py-3 mb-2', selected.has(w.address) ? 'border-blue-600' : 'border-gray-700']">
 
                     <!-- View mode -->
                     <div v-if="editingWallet !== w.address" class="flex items-center justify-between">
-                        <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-3 flex-1 min-w-0">
+                            <input type="checkbox" :checked="selected.has(w.address)" @change="toggleSelect(w.address)"
+                                   class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-0 cursor-pointer shrink-0">
+                            <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2">
                                 <span class="text-gray-600 text-xs">#{{ offset + i + 1 }}</span>
                                 <a :href="profileUrl(w)" target="_blank"
@@ -226,6 +282,7 @@ function profileUrl(w) {
                             <div class="font-mono text-xs text-gray-500 mt-1 overflow-hidden text-ellipsis">{{ w.address }}</div>
                             <div v-if="w.profile_slug" class="text-xs text-gray-600 mt-0.5">
                                 polymarket.com/@{{ w.profile_slug }}
+                            </div>
                             </div>
                         </div>
                         <div class="flex gap-2 ml-3 shrink-0">

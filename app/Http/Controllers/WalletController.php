@@ -106,6 +106,26 @@ class WalletController extends Controller
     }
 
     /**
+     * Bulk-delete tracked wallets.
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        $wallets = $request->input('wallets', []);
+        if (! is_array($wallets) || empty($wallets)) {
+            return response()->json(['error' => 'No wallets provided'], 400);
+        }
+
+        $addresses = array_map(fn ($w) => strtolower(trim($w)), $wallets);
+        $deleted = TrackedWallet::whereIn('address', $addresses)->delete();
+
+        return response()->json([
+            'ok' => true,
+            'deleted' => $deleted,
+            'wallets' => TrackedWallet::count(),
+        ]);
+    }
+
+    /**
      * Remove a tracked wallet.
      */
     public function destroy(Request $request): JsonResponse

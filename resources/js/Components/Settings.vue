@@ -5,6 +5,7 @@ const settings = ref({});
 const loading = ref(true);
 const saving = ref(false);
 const saveMsg = ref('');
+const resetting = ref(false);
 const editValues = ref({});
 
 const groups = [
@@ -113,6 +114,31 @@ async function resetSetting(key) {
     }
 }
 
+async function resetAllData() {
+    if (!confirm('Reset ALL data? This will delete all positions, trade history, pending orders, and seen trades. Tracked wallets will be kept. This cannot be undone.')) return;
+    if (!confirm('Are you sure? This is irreversible.')) return;
+    resetting.value = true;
+    try {
+        const r = await fetch('/api/reset-data', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+            showMsg('All data has been reset.', false);
+        } else {
+            showMsg('Failed to reset data', true);
+        }
+    } catch (e) {
+        console.error('Failed to reset data', e);
+        showMsg('Network error during reset', true);
+    } finally {
+        resetting.value = false;
+    }
+}
+
+function showMsg(text, isError) {
+    saveMsg.value = isError ? 'Error: ' + text : text;
+    setTimeout(() => saveMsg.value = '', 4000);
+}
+
 function fmtDefault(s) {
     if (s.default === null || s.default === undefined) return 'none';
     if (s.type === 'bool') return s.default ? 'on' : 'off';
@@ -182,6 +208,23 @@ onMounted(fetchSettings);
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="mb-6">
+                <h3 class="text-red-400 text-sm font-semibold mb-1">Danger Zone</h3>
+                <p class="text-gray-600 text-xs mb-3">Irreversible actions.</p>
+                <div class="bg-gray-900 border border-red-900 rounded-lg px-4 py-3 flex items-center justify-between">
+                    <div>
+                        <span class="text-gray-300 text-sm">Reset All Data</span>
+                        <p class="text-gray-600 text-xs mt-0.5">Deletes all positions, trades, pending orders. Keeps tracked wallets.</p>
+                    </div>
+                    <button @click="resetAllData" :disabled="resetting"
+                            class="text-sm font-semibold px-4 py-2 rounded bg-red-700 hover:bg-red-600 text-white
+                                   transition-colors disabled:opacity-50 shrink-0 ml-4">
+                        {{ resetting ? 'Resetting...' : 'Reset All Data' }}
+                    </button>
                 </div>
             </div>
 
