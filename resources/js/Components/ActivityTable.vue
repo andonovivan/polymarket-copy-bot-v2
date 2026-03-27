@@ -62,8 +62,8 @@ function outcomeBadgeClass(outcome) {
     if (!outcome) return 'bg-gray-700 text-gray-300';
     const lower = outcome.toLowerCase();
     if (lower === 'yes') return 'bg-green-900/60 text-green-400';
-    if (lower === 'no') return 'bg-red-900/60 text-red-400';
-    return 'bg-blue-900/60 text-blue-400';
+    if (lower === 'no' || lower.startsWith('no ')) return 'bg-red-900/60 text-red-400';
+    return 'bg-green-900/60 text-green-400';
 }
 
 async function closePosition(assetId) {

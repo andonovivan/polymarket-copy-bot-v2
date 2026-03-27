@@ -224,20 +224,36 @@ class PolymarketClient
                         return null;
                     }
 
-                    // Market question text.
-                    $question = $market['question'] ?? $event['title'] ?? null;
+                    $groupItemTitle = $market['groupItemTitle'] ?? null;
+
+                    // For grouped markets, use event title as the question (parent market name).
+                    // For standalone markets, use the market question directly.
+                    $question = ($groupItemTitle && $event)
+                        ? ($event['title'] ?? $market['question'] ?? null)
+                        : ($market['question'] ?? $event['title'] ?? null);
 
                     // Image: prefer event image, fall back to market image.
                     $image = $event['image'] ?? $market['image'] ?? $market['icon'] ?? null;
 
-                    // Determine which outcome this token represents (Yes/No/custom).
+                    // Determine which outcome this token represents.
                     $outcome = null;
                     $tokenIds = json_decode($market['clobTokenIds'] ?? '[]', true);
                     $outcomes = json_decode($market['outcomes'] ?? '[]', true);
                     if (is_array($tokenIds) && is_array($outcomes)) {
                         $idx = array_search($tokenId, $tokenIds);
                         if ($idx !== false && isset($outcomes[$idx])) {
-                            $outcome = $outcomes[$idx];
+                            $rawOutcome = $outcomes[$idx];
+
+                            // For grouped markets with Yes/No outcomes, replace generic "Yes"/"No"
+                            // with the group item title so users know which option was selected.
+                            // E.g. "280-299" instead of "Yes" for "Elon Musk tweets 280-299".
+                            if ($groupItemTitle && in_array($rawOutcome, ['Yes', 'No'])) {
+                                $outcome = $rawOutcome === 'Yes'
+                                    ? $groupItemTitle
+                                    : 'No ' . $groupItemTitle;
+                            } else {
+                                $outcome = $rawOutcome;
+                            }
                         }
                     }
 
