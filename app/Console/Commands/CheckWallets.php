@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\TrackedWallet;
+use App\Services\Setting;
 use App\Services\WalletScoring;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -21,16 +22,18 @@ class CheckWallets extends Command
             return self::SUCCESS;
         }
 
-        $maxUnrealizedLoss = (float) config('polymarket.auto_pause_max_unrealized_loss', -50);
-        $maxExposureLossRatio = (float) config('polymarket.auto_pause_max_exposure_loss_ratio', 0.20);
-        $minExposure = (float) config('polymarket.auto_pause_min_exposure', 100);
-        $badRecordMinTrades = (int) config('polymarket.auto_pause_bad_record_min_trades', 5);
-        $badRecordMaxWinRate = (float) config('polymarket.auto_pause_bad_record_max_win_rate', 40);
-        $badRecordMaxLoss = (float) config('polymarket.auto_pause_bad_record_max_loss', -10);
-        $zeroWinMinTrades = (int) config('polymarket.auto_pause_zero_win_min_trades', 3);
-        $rollingExpectancyTrades = (int) config('polymarket.auto_pause_rolling_expectancy_trades', 20);
-        $minProfitFactor = (float) config('polymarket.auto_pause_min_profit_factor', 1.0);
-        $profitFactorMinTrades = (int) config('polymarket.auto_pause_profit_factor_min_trades', 10);
+        // Read all thresholds from runtime settings (DB override > env > defaults).
+        $gracePeriodTrades = (int) Setting::get('auto_pause_grace_period_trades', 10);
+        $maxUnrealizedLoss = (float) Setting::get('auto_pause_max_unrealized_loss', -50);
+        $maxExposureLossRatio = (float) Setting::get('auto_pause_max_exposure_loss_ratio', 0.20);
+        $minExposure = (float) Setting::get('auto_pause_min_exposure', 100);
+        $badRecordMinTrades = (int) Setting::get('auto_pause_bad_record_min_trades', 15);
+        $badRecordMaxWinRate = (float) Setting::get('auto_pause_bad_record_max_win_rate', 30);
+        $badRecordMaxLoss = (float) Setting::get('auto_pause_bad_record_max_loss', -25);
+        $zeroWinMinTrades = (int) Setting::get('auto_pause_zero_win_min_trades', 8);
+        $rollingExpectancyTrades = (int) Setting::get('auto_pause_rolling_expectancy_trades', 40);
+        $minProfitFactor = (float) Setting::get('auto_pause_min_profit_factor', 0.7);
+        $profitFactorMinTrades = (int) Setting::get('auto_pause_profit_factor_min_trades', 25);
 
         $addresses = $wallets->pluck('address')->all();
 
@@ -76,13 +79,17 @@ class CheckWallets extends Command
 
             $combinedPnl = round($realizedPnl + $unrealizedPnl, 4);
 
-            // Rule 1: Deep unrealized loss.
+            // Grace period: skip all rules if the wallet hasn't had enough closed trades yet.
+            // Rules 1-2 (unrealized loss) still apply — they protect against immediate capital loss.
+            $inGracePeriod = $totalTrades < $gracePeriodTrades;
+
+            // Rule 1: Deep unrealized loss (always applies, even during grace period).
             $reason = null;
             if ($unrealizedPnl < $maxUnrealizedLoss) {
                 $reason = 'auto:deep_unrealized_loss';
             }
 
-            // Rule 2: High exposure + losing (unrealized loss > X% of invested).
+            // Rule 2: High exposure + losing (always applies, even during grace period).
             if (! $reason && $totalInvested > $minExposure && $unrealizedPnl < 0) {
                 $lossRatio = abs($unrealizedPnl) / $totalInvested;
                 if ($lossRatio >= $maxExposureLossRatio) {
@@ -90,33 +97,36 @@ class CheckWallets extends Command
                 }
             }
 
-            // Rule 3: Bad closed track record (enough trades + low win rate + losing).
-            if (! $reason && $totalTrades >= $badRecordMinTrades && $winRate < $badRecordMaxWinRate && $combinedPnl < $badRecordMaxLoss) {
-                $reason = 'auto:bad_track_record';
-            }
-
-            // Rule 4: Small sample but zero wins.
-            if (! $reason && $totalTrades >= $zeroWinMinTrades && $winningTrades === 0) {
-                $reason = 'auto:zero_wins';
-            }
-
-            // Rule 5: Negative rolling expectancy (last N trades losing on average).
-            if (! $reason) {
-                $metrics = $walletScores[$address] ?? null;
-                if ($metrics && $metrics['total_closed_trades'] >= $rollingExpectancyTrades
-                    && $metrics['rolling_expectancy'] !== null
-                    && $metrics['rolling_expectancy'] < 0) {
-                    $reason = 'auto:negative_rolling_expectancy';
+            // Rules 3-6 only apply after the grace period.
+            if (! $inGracePeriod) {
+                // Rule 3: Bad closed track record (enough trades + low win rate + losing).
+                if (! $reason && $totalTrades >= $badRecordMinTrades && $winRate < $badRecordMaxWinRate && $combinedPnl < $badRecordMaxLoss) {
+                    $reason = 'auto:bad_track_record';
                 }
-            }
 
-            // Rule 6: Low profit factor (gross profit / gross loss < threshold).
-            if (! $reason) {
-                $metrics = $walletScores[$address] ?? null;
-                if ($metrics && $metrics['total_closed_trades'] >= $profitFactorMinTrades
-                    && $metrics['profit_factor'] !== null
-                    && $metrics['profit_factor'] < $minProfitFactor) {
-                    $reason = 'auto:low_profit_factor';
+                // Rule 4: Zero wins after enough trades.
+                if (! $reason && $totalTrades >= $zeroWinMinTrades && $winningTrades === 0) {
+                    $reason = 'auto:zero_wins';
+                }
+
+                // Rule 5: Negative rolling expectancy (last N trades losing on average).
+                if (! $reason) {
+                    $metrics = $walletScores[$address] ?? null;
+                    if ($metrics && $metrics['total_closed_trades'] >= $rollingExpectancyTrades
+                        && $metrics['rolling_expectancy'] !== null
+                        && $metrics['rolling_expectancy'] < 0) {
+                        $reason = 'auto:negative_rolling_expectancy';
+                    }
+                }
+
+                // Rule 6: Low profit factor (gross profit / gross loss < threshold).
+                if (! $reason) {
+                    $metrics = $walletScores[$address] ?? null;
+                    if ($metrics && $metrics['total_closed_trades'] >= $profitFactorMinTrades
+                        && $metrics['profit_factor'] !== null
+                        && $metrics['profit_factor'] < $minProfitFactor) {
+                        $reason = 'auto:low_profit_factor';
+                    }
                 }
             }
 

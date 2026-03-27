@@ -13,6 +13,7 @@ const groups = [
     { key: 'limits', label: 'Risk Limits', description: 'Per-market and per-wallet exposure caps.' },
     { key: 'behavior', label: 'Trade Behavior', description: 'Core trade copy behavior.' },
     { key: 'polling', label: 'Polling', description: 'How often and how wallets are polled for trades.' },
+    { key: 'auto_pause', label: 'Auto-Pause Rules', description: 'Thresholds for automatically pausing poorly performing wallets. Grace period skips rules 3-6 until enough trades.' },
 ];
 
 function groupSettings(groupKey) {

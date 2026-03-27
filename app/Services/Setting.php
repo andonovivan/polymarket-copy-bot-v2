@@ -47,6 +47,19 @@ class Setting
         'poll_batch_delay_ms' => ['type' => 'int', 'label' => 'Batch Delay (ms)', 'group' => 'polling'],
         'inactive_wallet_days' => ['type' => 'int', 'label' => 'Inactive Wallet Threshold (days)', 'group' => 'polling'],
         'inactive_poll_interval_seconds' => ['type' => 'int', 'label' => 'Inactive Poll Interval (sec)', 'group' => 'polling'],
+
+        // Auto-Pause Rules
+        'auto_pause_grace_period_trades' => ['type' => 'int', 'label' => 'Grace Period (min trades before rules apply)', 'group' => 'auto_pause'],
+        'auto_pause_max_unrealized_loss' => ['type' => 'float', 'label' => 'Max Unrealized Loss ($)', 'group' => 'auto_pause'],
+        'auto_pause_min_exposure' => ['type' => 'float', 'label' => 'Min Exposure for Loss Ratio ($)', 'group' => 'auto_pause'],
+        'auto_pause_max_exposure_loss_ratio' => ['type' => 'float', 'label' => 'Max Exposure Loss Ratio', 'group' => 'auto_pause'],
+        'auto_pause_bad_record_min_trades' => ['type' => 'int', 'label' => 'Bad Record Min Trades', 'group' => 'auto_pause'],
+        'auto_pause_bad_record_max_win_rate' => ['type' => 'float', 'label' => 'Bad Record Max Win Rate (%)', 'group' => 'auto_pause'],
+        'auto_pause_bad_record_max_loss' => ['type' => 'float', 'label' => 'Bad Record Max Loss ($)', 'group' => 'auto_pause'],
+        'auto_pause_zero_win_min_trades' => ['type' => 'int', 'label' => 'Zero Wins Min Trades', 'group' => 'auto_pause'],
+        'auto_pause_rolling_expectancy_trades' => ['type' => 'int', 'label' => 'Rolling Expectancy Window', 'group' => 'auto_pause'],
+        'auto_pause_min_profit_factor' => ['type' => 'float', 'label' => 'Min Profit Factor', 'group' => 'auto_pause'],
+        'auto_pause_profit_factor_min_trades' => ['type' => 'int', 'label' => 'Profit Factor Min Trades', 'group' => 'auto_pause'],
     ];
 
     /**

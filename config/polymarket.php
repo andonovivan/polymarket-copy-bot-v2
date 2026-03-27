@@ -24,22 +24,24 @@ return [
     'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
 
     // Auto-pause thresholds — wallet is paused if ANY rule triggers.
+    // Grace period: skip ALL rules until wallet has at least N closed trades.
+    'auto_pause_grace_period_trades' => (int) env('POLYMARKET_AUTO_PAUSE_GRACE_PERIOD_TRADES', 10),
     // Rule 1: Deep unrealized loss (absolute).
     'auto_pause_max_unrealized_loss' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_UNREALIZED_LOSS', -50),
     // Rule 2: High exposure + losing (unrealized loss > ratio of invested, when invested > min).
     'auto_pause_min_exposure' => (float) env('POLYMARKET_AUTO_PAUSE_MIN_EXPOSURE', 100),
     'auto_pause_max_exposure_loss_ratio' => (float) env('POLYMARKET_AUTO_PAUSE_MAX_EXPOSURE_LOSS_RATIO', 0.20),
     // Rule 3: Bad closed track record (min trades + low win rate + negative combined P&L).
-    'auto_pause_bad_record_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MIN_TRADES', 5),
-    'auto_pause_bad_record_max_win_rate' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_WIN_RATE', 40),
-    'auto_pause_bad_record_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS', -10),
+    'auto_pause_bad_record_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MIN_TRADES', 15),
+    'auto_pause_bad_record_max_win_rate' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_WIN_RATE', 30),
+    'auto_pause_bad_record_max_loss' => (float) env('POLYMARKET_AUTO_PAUSE_BAD_RECORD_MAX_LOSS', -25),
     // Rule 4: Small sample but zero wins.
-    'auto_pause_zero_win_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES', 3),
+    'auto_pause_zero_win_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ZERO_WIN_MIN_TRADES', 8),
     // Rule 5: Negative rolling expectancy (avg P&L over last N trades).
-    'auto_pause_rolling_expectancy_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ROLLING_EXPECTANCY_TRADES', 20),
+    'auto_pause_rolling_expectancy_trades' => (int) env('POLYMARKET_AUTO_PAUSE_ROLLING_EXPECTANCY_TRADES', 40),
     // Rule 6: Low profit factor (gross profit / gross loss < threshold after N trades).
-    'auto_pause_min_profit_factor' => (float) env('POLYMARKET_AUTO_PAUSE_MIN_PROFIT_FACTOR', 1.0),
-    'auto_pause_profit_factor_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_PROFIT_FACTOR_MIN_TRADES', 10),
+    'auto_pause_min_profit_factor' => (float) env('POLYMARKET_AUTO_PAUSE_MIN_PROFIT_FACTOR', 0.7),
+    'auto_pause_profit_factor_min_trades' => (int) env('POLYMARKET_AUTO_PAUSE_PROFIT_FACTOR_MIN_TRADES', 25),
 
     // Composite wallet score — minimum trades to compute.
     'score_min_trades' => (int) env('POLYMARKET_SCORE_MIN_TRADES', 5),
