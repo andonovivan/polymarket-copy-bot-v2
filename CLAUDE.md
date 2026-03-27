@@ -59,11 +59,11 @@ npm run build                    # Build frontend assets
 - **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report using a single SQL query with LEFT JOIN subqueries for aggregation, sorting (ORDER BY), and pagination (LIMIT/OFFSET). WalletScoring is computed only for the current page's wallets (not all). `GET /api/wallet-report/summary` returns aggregate totals (profitable/losing/paused counts, best performer, average score) across all wallets — fetched separately from table data.
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). Supports optional `wallets[]` query param to filter by `copied_from_wallet`. `POST /api/close` manually closes a position at current midpoint. `POST /api/close-all` closes all open positions at current midpoints.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination). Supports optional `wallets[]` and `period` (1D/1W/1M/ALL) query params — wallet filter on `copied_from_wallet`, period filter on `closed_at`.
-- **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove).
+- **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove), `DELETE /api/wallets/bulk` (bulk delete by address array), `PATCH /api/wallets/bulk-pause` (bulk pause/resume by address array).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 - **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
-- **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default.
+- **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default. `POST /api/reset-data` resets all data (positions, trades, pending orders, seen trades, PnlSummary, BotMeta runtime keys, wallet watermarks) while keeping tracked wallets and settings intact.
 
 ### Models (`app/Models/`)
 
@@ -87,10 +87,10 @@ npm run build                    # Build frontend assets
 - **Pagination.vue** - Shared pagination (First/Prev/Next/Last) with per-page size dropdown. Used by all tables including WalletsManager.
 - **PositionsTable.vue** - Uses DataTable with `apiUrl="/api/positions"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Custom slots for Close button, status badges, null price handling, trader profile links, and market links (asset ID links to `polymarket.com/event/{slug}` when `market_slug` is available).
 - **TradeHistoryTable.vue** - Uses DataTable with `apiUrl="/api/trades"`. Accepts `filters` prop passed through as `extraParams` to DataTable. Custom slots for trader link, P&L coloring, and market links (asset ID links to Polymarket when `market_slug` available).
-- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
+- **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Checkbox selection with select-all-on-page, bulk Pause/Resume/Delete actions for selected wallets. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
 - **WalletReport.vue** - Uses DataTable with `apiUrl="/api/wallet-report"`. Summary cards fetched independently from `GET /api/wallet-report/summary` (totals across all wallets, not just current page). Composite score column (0-100) with color gradient and hover tooltip showing score breakdown (profit factor, expectancy, win rate, drawdown, consistency). Pause/Resume buttons and win rate coloring.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
-- **Settings.vue** - Bot settings UI with grouped form sections (Trade Sizing, Risk Limits, Trade Behavior, Polling). Each setting shows current value, env default, and "custom" badge when overridden. Boolean settings use toggle switches. "Save Changes" button with dirty-state tracking. Per-field "reset" to revert to env default. Fixed Amount Override toggle at the top of sizing section — when set, bypasses all dynamic sizing logic.
+- **Settings.vue** - Bot settings UI with grouped form sections (Trade Sizing, Risk Limits, Trade Behavior, Polling). Each setting shows current value, env default, and "custom" badge when overridden. Boolean settings use toggle switches. "Save Changes" button with dirty-state tracking. Per-field "reset" to revert to env default. Fixed Amount Override toggle at the top of sizing section — when set, bypasses all dynamic sizing logic. Danger Zone section with "Reset All Data" button (confirmation dialog) that clears all positions, trades, and stats while keeping wallets and settings.
 
 ### Configuration (`config/polymarket.php`)
 
@@ -228,8 +228,8 @@ app/
     PositionController.php   # GET /api/positions (paginated) + POST /api/close + POST /api/close-all
     WalletReportController.php # GET /api/wallet-report (paginated)
     TradeHistoryController.php # GET /api/trades (paginated)
-    SettingsController.php   # GET/PUT/DELETE /api/settings - runtime config
-    WalletController.php     # CRUD /api/wallets + PATCH /api/wallets/pause
+    SettingsController.php   # GET/PUT/DELETE /api/settings - runtime config + POST /api/reset-data
+    WalletController.php     # CRUD /api/wallets + pause/resume + bulk delete/pause
   Models/
     BotMeta.php              # Key-value metadata store
     PendingOrder.php         # Orders awaiting fill on the CLOB orderbook
@@ -249,7 +249,7 @@ config/
   polymarket.php             # All trading configuration
 database/migrations/         # 13 migration files (includes performance indexes, market_slug, pending_orders, last_trade_ts)
 resources/js/
-  Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover)
+  Pages/Dashboard.vue        # Main page (tabs: Dashboard, Wallets, Report, Discover, Settings)
   Components/
     BalanceBar.vue           # Balance management (Polymarket + trading limit)
     DataTable.vue            # Generic server-side paginated/sortable table with slots
@@ -260,7 +260,7 @@ resources/js/
     TradeHistoryTable.vue    # Closed trades (uses DataTable)
     Settings.vue             # Bot settings UI (grouped, with toggle/reset per field)
     WalletDiscovery.vue      # Leaderboard discovery + add wallets
-    WalletsManager.vue       # Wallet CRUD UI (client-side pagination)
+    WalletsManager.vue       # Wallet CRUD UI (checkbox select, bulk pause/resume/delete, client-side pagination)
     WalletReport.vue         # Per-wallet performance report (uses DataTable)
   utils/
     formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl

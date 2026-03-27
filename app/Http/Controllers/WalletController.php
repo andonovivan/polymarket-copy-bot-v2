@@ -126,6 +126,32 @@ class WalletController extends Controller
     }
 
     /**
+     * Bulk pause/resume tracked wallets.
+     */
+    public function bulkTogglePause(Request $request): JsonResponse
+    {
+        $wallets = $request->input('wallets', []);
+        if (! is_array($wallets) || empty($wallets)) {
+            return response()->json(['error' => 'No wallets provided'], 400);
+        }
+
+        $paused = (bool) $request->input('paused', true);
+        $addresses = array_map(fn ($w) => strtolower(trim($w)), $wallets);
+
+        $updated = TrackedWallet::whereIn('address', $addresses)->update([
+            'is_paused' => $paused,
+            'paused_at' => $paused ? now() : null,
+            'pause_reason' => $paused ? 'manual' : null,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'updated' => $updated,
+            'paused' => $paused,
+        ]);
+    }
+
+    /**
      * Remove a tracked wallet.
      */
     public function destroy(Request $request): JsonResponse

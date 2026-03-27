@@ -20,6 +20,7 @@ Route::put('/wallets', [WalletController::class, 'update']);
 Route::patch('/wallets/pause', [WalletController::class, 'togglePause']);
 Route::delete('/wallets', [WalletController::class, 'destroy']);
 Route::delete('/wallets/bulk', [WalletController::class, 'bulkDestroy']);
+Route::patch('/wallets/bulk-pause', [WalletController::class, 'bulkTogglePause']);
 Route::post('/close', [PositionController::class, 'close']);
 Route::post('/close-all', [PositionController::class, 'closeAll']);
 Route::post('/global-pause', [GlobalPauseController::class, 'toggle']);

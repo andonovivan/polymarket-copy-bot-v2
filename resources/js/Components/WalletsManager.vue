@@ -165,6 +165,25 @@ function toggleSelectAll() {
     selected.value = s;
 }
 
+async function bulkPause(paused) {
+    const count = selected.value.size;
+    const action = paused ? 'Pause' : 'Resume';
+    if (!confirm(`${action} ${count} selected wallet${count !== 1 ? 's' : ''}?`)) return;
+    try {
+        const r = await fetch('/api/wallets/bulk-pause', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ wallets: [...selected.value], paused }),
+        });
+        const d = await r.json();
+        if (d.error) { showMsg(d.error, true); return; }
+        selected.value = new Set();
+        showMsg(`${action}d ${d.updated} wallet${d.updated !== 1 ? 's' : ''}`, false);
+        emit('refresh');
+        fetchWallets();
+    } catch(e) { showMsg(`Failed to bulk ${action.toLowerCase()}`, true); }
+}
+
 async function bulkDelete() {
     const count = selected.value.size;
     if (!confirm(`Delete ${count} selected wallet${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
@@ -246,10 +265,20 @@ function profileUrl(w) {
                     {{ wallets.length }} wallet{{ wallets.length !== 1 ? 's' : '' }} tracked
                     <span v-if="hasSelected" class="text-yellow-500 ml-2">({{ selected.size }} selected)</span>
                 </span>
-                <button v-if="hasSelected" @click="bulkDelete"
-                        class="bg-red-700 hover:bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
-                    Delete Selected ({{ selected.size }})
-                </button>
+                <div v-if="hasSelected" class="flex gap-2">
+                    <button @click="bulkPause(true)"
+                            class="bg-orange-700 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
+                        Pause Selected ({{ selected.size }})
+                    </button>
+                    <button @click="bulkPause(false)"
+                            class="bg-green-700 hover:bg-green-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
+                        Resume Selected ({{ selected.size }})
+                    </button>
+                    <button @click="bulkDelete"
+                            class="bg-red-700 hover:bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
+                        Delete Selected ({{ selected.size }})
+                    </button>
+                </div>
             </div>
 
             <div v-if="wallets.length > 0" class="flex items-center gap-2 mb-2 px-1">
