@@ -204,7 +204,11 @@ class PolymarketClient
             if ($response->successful()) {
                 $markets = $response->json();
                 if (!empty($markets) && is_array($markets)) {
-                    $slug = $markets[0]['slug'] ?? null;
+                    // Prefer the event slug (parent market) — that's what Polymarket URLs use.
+                    // Fall back to market-level slug if no event is attached.
+                    $slug = $markets[0]['events'][0]['slug']
+                         ?? $markets[0]['slug']
+                         ?? null;
                     if ($slug) {
                         Cache::put($cacheKey, $slug, 86400);
                         return $slug;
