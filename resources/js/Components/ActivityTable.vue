@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, fmtDate, timeAgo, shortId, traderLabel, traderUrl, marketUrl } from '../utils/formatters.js';
 
 const emit = defineEmits(['refresh']);
 const props = defineProps({
@@ -11,9 +11,9 @@ const props = defineProps({
 
 const activeSubTab = ref('active');
 const positionsRef = ref(null);
-const tradesRef = ref(null);
+const activityRef = ref(null);
 
-// Active tab columns — Polymarket-inspired layout.
+// Positions tab columns.
 const positionColumns = [
     { key: 'market', label: 'Market', sortable: false },
     { key: 'trader_name', label: 'Trader' },
@@ -23,24 +23,26 @@ const positionColumns = [
     { key: 'opened_at', label: 'Opened' },
 ];
 
-// Closed tab columns.
-const tradeColumns = [
+// Activity tab columns — Polymarket style.
+const activityColumns = [
+    { key: 'type', label: 'Type', sortable: false },
     { key: 'market', label: 'Market', sortable: false },
-    { key: 'trader_name', label: 'Trader' },
-    { key: 'buy_price', label: 'Buy' },
-    { key: 'sell_price', label: 'Sell' },
-    { key: 'pnl', label: 'P&L' },
-    { key: 'closed_at', label: 'Closed' },
+    { key: 'trader_name', label: 'Trader', sortable: false },
+    { key: 'amount', label: 'Amount' },
 ];
 
 function fmtPrice(v) {
     if (v === null || v === undefined) return '-';
-    // Show as cents (e.g. 17.9¢) for values under $1, otherwise dollars.
     if (v < 1) {
         const cents = (v * 100).toFixed(1);
         return `${cents}¢`;
     }
     return `$${v.toFixed(2)}`;
+}
+
+function fmtAmount(v) {
+    if (v === null || v === undefined) return '-';
+    return '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function pnlPct(row) {
@@ -51,11 +53,10 @@ function pnlPct(row) {
     return `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
 }
 
-function closedPnlPct(row) {
-    const cost = row.buy_price * row.shares;
-    if (!cost || cost === 0) return '';
-    const pct = (row.pnl / cost) * 100;
-    return `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
+function typeClass(type) {
+    if (type === 'Buy') return 'text-green-400';
+    if (type === 'Sell') return 'text-red-400';
+    return 'text-gray-400'; // Redeem
 }
 
 function outcomeBadgeClass(outcome) {
@@ -86,7 +87,7 @@ async function closePosition(assetId) {
 
 <template>
     <div>
-        <!-- Sub-tabs: Active / Closed -->
+        <!-- Sub-tabs: Positions / Activity -->
         <div class="flex items-center gap-1 mb-4">
             <button @click="activeSubTab = 'active'"
                     :class="[
@@ -97,10 +98,10 @@ async function closePosition(assetId) {
                     ]">
                 Positions
             </button>
-            <button @click="activeSubTab = 'closed'"
+            <button @click="activeSubTab = 'activity'"
                     :class="[
                         'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-                        activeSubTab === 'closed'
+                        activeSubTab === 'activity'
                             ? 'bg-gray-700 text-white'
                             : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
                     ]">
@@ -204,16 +205,23 @@ async function closePosition(assetId) {
             </template>
         </DataTable>
 
-        <!-- Closed Trades -->
-        <DataTable v-if="activeSubTab === 'closed'"
-                   ref="tradesRef"
-                   apiUrl="/api/trades"
-                   :columns="tradeColumns"
-                   defaultSort="closed_at" defaultOrder="desc" rowKey="asset_id"
-                   emptyMessage="No closed trades yet" loadingMessage="Loading trades..."
+        <!-- Activity Feed — Polymarket style -->
+        <DataTable v-if="activeSubTab === 'activity'"
+                   ref="activityRef"
+                   apiUrl="/api/activity"
+                   :columns="activityColumns"
+                   defaultSort="event_ts" defaultOrder="desc" rowKey="row_id"
+                   emptyMessage="No activity yet" loadingMessage="Loading activity..."
                    :refreshTrigger="refreshTrigger" :extraParams="filters">
 
-            <!-- Market cell: same layout as active -->
+            <!-- Type column -->
+            <template #cell-type="{ row }">
+                <span :class="typeClass(row.type)" class="text-sm font-medium">
+                    {{ row.type }}
+                </span>
+            </template>
+
+            <!-- Market cell: image + question + outcome badge with price + shares -->
             <template #cell-market="{ row }">
                 <div class="flex items-center gap-3 min-w-0">
                     <img v-if="row.market_image" :src="row.market_image"
@@ -235,7 +243,7 @@ async function closePosition(assetId) {
                             <span v-if="row.outcome"
                                   :class="outcomeBadgeClass(row.outcome)"
                                   class="text-xs font-semibold px-1.5 py-0.5 rounded">
-                                {{ row.outcome }}
+                                {{ row.outcome }} {{ fmtPrice(row.price) }}
                             </span>
                             <span class="text-xs text-gray-500">
                                 {{ Number(row.shares).toLocaleString(undefined, { maximumFractionDigits: 1 }) }} shares
@@ -245,6 +253,7 @@ async function closePosition(assetId) {
                 </div>
             </template>
 
+            <!-- Trader column -->
             <template #cell-trader_name="{ row }">
                 <a v-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
                    class="text-blue-400 hover:text-blue-300 hover:underline text-sm">
@@ -253,27 +262,16 @@ async function closePosition(assetId) {
                 <span v-else class="text-gray-500 text-sm">-</span>
             </template>
 
-            <template #cell-buy_price="{ row }">
-                <span class="text-sm">{{ fmtPrice(row.buy_price) }}</span>
-            </template>
-
-            <template #cell-sell_price="{ row }">
-                <span class="text-sm">{{ fmtPrice(row.sell_price) }}</span>
-            </template>
-
-            <template #cell-pnl="{ row }">
+            <!-- Amount + relative time -->
+            <template #cell-amount="{ row }">
                 <div class="text-right">
-                    <div :class="pnlClass(row.pnl)" class="text-sm font-medium">
-                        {{ fmtUsd(row.pnl) }}
+                    <div class="text-sm font-medium text-gray-200">
+                        {{ fmtAmount(row.amount) }}
                     </div>
-                    <div :class="pnlClass(row.pnl)" class="text-xs">
-                        {{ closedPnlPct(row) }}
+                    <div class="text-xs text-gray-500">
+                        {{ timeAgo(row.event_ts) }}
                     </div>
                 </div>
-            </template>
-
-            <template #cell-closed_at="{ row }">
-                <span class="text-sm text-gray-400">{{ fmtDate(row.closed_at) }}</span>
             </template>
         </DataTable>
     </div>

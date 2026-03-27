@@ -59,6 +59,7 @@ npm run build                    # Build frontend assets
 - **WalletReportController** - `GET /api/wallet-report` paginated per-wallet performance report using a single SQL query with LEFT JOIN subqueries for aggregation, sorting (ORDER BY), and pagination (LIMIT/OFFSET). WalletScoring is computed only for the current page's wallets (not all). `GET /api/wallet-report/summary` returns aggregate totals (profitable/losing/paused counts, best performer, average score) across all wallets — fetched separately from table data.
 - **PositionController** - `GET /api/positions` paginated open positions (server-side sort/pagination). Supports optional `wallets[]` query param to filter by `copied_from_wallet`. `POST /api/close` manually closes a position at current midpoint. `POST /api/close-all` closes all open positions at current midpoints.
 - **TradeHistoryController** - `GET /api/trades` paginated closed trades (server-side sort/pagination). Supports optional `wallets[]` and `period` (1D/1W/1M/ALL) query params — wallet filter on `copied_from_wallet`, period filter on `closed_at`.
+- **ActivityController** - `GET /api/activity` unified chronological activity feed. Uses a UNION query across positions (Buy events) and trade_history (Buy + Sell/Redeem events). Each open position generates one Buy event; each closed trade generates a Buy event (at `opened_at`) and a Sell or Redeem event (at `closed_at`). Redeem is inferred when `sell_price >= 0.999` or `<= 0.001` (market resolution). Supports `wallets[]` and `period` filters, sortable by `event_ts` or `amount`. Paginated with trader lookup.
 - **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove), `DELETE /api/wallets/bulk` (bulk delete by address array), `PATCH /api/wallets/bulk-pause` (bulk pause/resume by address array).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 - **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
@@ -85,7 +86,7 @@ npm run build                    # Build frontend assets
 - **StatsCards.vue** - Six stat cards: Combined P&L, Unrealized P&L, Realized P&L, Win Rate, Open Positions, Total Invested. Receives filtered or unfiltered data via `displayData` computed from Dashboard.
 - **DataTable.vue** - Generic server-side paginated, sortable table component. Handles fetch, sort, pagination, per-page size selector (10/25/50/100), loading spinner, and empty state. Columns can be marked `sortable: false` to disable sorting (no cursor/arrow, click ignored). Exposes scoped slots (`#cell-{key}`, `#row-actions`, `#above-table`, `#extra-headers`) for custom cell rendering. Supports `extraParams` prop for appending arbitrary query params (including arrays) to API requests — watched via `JSON.stringify` to re-fetch with page reset only when values actually change. Used by ActivityTable and WalletReport.
 - **Pagination.vue** - Shared pagination (First/Prev/Next/Last) with per-page size dropdown. Used by all tables including WalletsManager.
-- **ActivityTable.vue** - Unified Polymarket-style positions/trades view with Positions/Activity sub-tabs. Positions tab shows open positions with market image, question text, outcome badge (Yes/No with price), shares, avg/current price, value with P&L (amount + %), and Close button. Activity tab shows closed trades with same market layout, buy/sell prices, P&L with %. Both tabs use DataTable internally, switching `apiUrl` between `/api/positions` and `/api/trades`. Replaces the previous separate PositionsTable and TradeHistoryTable components.
+- **ActivityTable.vue** - Unified Polymarket-style positions/activity view with Positions/Activity sub-tabs. Positions tab shows open positions with market image, question text, outcome badge (Yes/No with price), shares, avg/current price, value with P&L (amount + %), and Close button. Activity tab is a chronological feed of all Buy/Sell/Redeem events (matching Polymarket's layout) with TYPE, MARKET, TRADER, and AMOUNT columns. Each closed trade generates two activity events (Buy at opened_at + Sell/Redeem at closed_at); open positions generate a Buy event. Redeem = market resolution (sell_price ~$1 or ~$0). Amount shows dollar value with relative time ("5h ago"). Uses `/api/activity` (UNION query across positions + trade_history). Replaces the previous separate PositionsTable and TradeHistoryTable components.
 - **PositionsTable.vue** - Legacy component (replaced by ActivityTable on the Dashboard). Uses DataTable with `apiUrl="/api/positions"`.
 - **TradeHistoryTable.vue** - Legacy component (replaced by ActivityTable on the Dashboard). Uses DataTable with `apiUrl="/api/trades"`.
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Checkbox selection with select-all-on-page, bulk Pause/Resume/Delete actions for selected wallets. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
@@ -223,6 +224,7 @@ app/
   DTOs/
     DetectedTrade.php        # Immutable trade data object
   Http/Controllers/
+    ActivityController.php   # GET /api/activity - unified chronological activity feed
     BalanceController.php    # PUT /api/balance - trading balance limit
     DashboardController.php  # Dashboard page + /api/data (summary stats only)
     DiscoverController.php   # GET/POST /api/discover - leaderboard discovery
@@ -266,7 +268,7 @@ resources/js/
     WalletsManager.vue       # Wallet CRUD UI (checkbox select, bulk pause/resume/delete, client-side pagination)
     WalletReport.vue         # Per-wallet performance report (uses DataTable)
   utils/
-    formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, shortId, traderLabel, traderUrl, marketUrl
+    formatters.js            # Shared formatting: fmtUsd, pnlClass, fmtDate, timeAgo, shortId, traderLabel, traderUrl, marketUrl
 routes/
   api.php                    # API endpoints
   console.php                # Scheduled tasks

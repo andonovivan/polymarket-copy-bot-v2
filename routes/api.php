@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\BalanceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiscoverController;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/data', [DashboardController::class, 'data']);
 Route::get('/positions', [PositionController::class, 'index']);
 Route::get('/trades', [TradeHistoryController::class, 'index']);
+Route::get('/activity', [ActivityController::class, 'index']);
 Route::get('/wallets', [WalletController::class, 'index']);
 Route::post('/wallets', [WalletController::class, 'store']);
 Route::put('/wallets', [WalletController::class, 'update']);
