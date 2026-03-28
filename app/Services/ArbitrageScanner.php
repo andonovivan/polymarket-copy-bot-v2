@@ -201,8 +201,9 @@ class ArbitrageScanner
             $position->shares = $newShares;
             $position->exposure = ($position->exposure ?? 0) + ($fillPrice * $shares);
             $position->copied_from_wallet = 'arb:scanner';
-            $position->market_slug = $market['slug'];
-            // market_question, market_image, outcome backfilled by bot:update-prices (20 per cycle).
+            // market_slug, market_question, market_image, outcome backfilled by bot:update-prices
+            // (20 per cycle). We don't set market_slug here because the scan data has the
+            // individual market slug, not the event slug needed for Polymarket URLs.
 
             if (! $position->opened_at || $oldShares <= 0) {
                 $position->opened_at = now();
@@ -235,7 +236,7 @@ class ArbitrageScanner
                     'size' => $shares,
                     'amount_usdc' => round($price * $shares, 4),
                     'copied_from_wallet' => 'arb:scanner',
-                    'market_slug' => $market['slug'],
+                    'market_slug' => null,
                     'status' => $status,
                     'placed_at' => now(),
                 ]);
