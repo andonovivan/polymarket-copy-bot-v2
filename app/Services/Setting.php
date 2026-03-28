@@ -60,6 +60,7 @@ class Setting
         'inactive_poll_interval_seconds' => ['type' => 'int', 'label' => 'Inactive Poll Interval (sec)', 'group' => 'polling'],
 
         // Auto-Pause Rules
+        'auto_pause_enabled' => ['type' => 'bool', 'label' => 'Enable Auto-Pause', 'group' => 'auto_pause'],
         'auto_pause_grace_period_trades' => ['type' => 'int', 'label' => 'Grace Period (min trades before rules apply)', 'group' => 'auto_pause'],
         'auto_pause_max_unrealized_loss' => ['type' => 'float', 'label' => 'Max Unrealized Loss ($)', 'group' => 'auto_pause'],
         'auto_pause_min_exposure' => ['type' => 'float', 'label' => 'Min Exposure for Loss Ratio ($)', 'group' => 'auto_pause'],

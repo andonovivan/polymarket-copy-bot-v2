@@ -17,6 +17,10 @@ class CheckWallets extends Command
 
     public function handle(): int
     {
+        if (! Setting::get('auto_pause_enabled', true)) {
+            return self::SUCCESS;
+        }
+
         $wallets = TrackedWallet::where('is_paused', false)->get();
         if ($wallets->isEmpty()) {
             return self::SUCCESS;

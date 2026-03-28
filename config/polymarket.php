@@ -35,6 +35,7 @@ return [
     'sl_percentage' => (float) env('POLYMARKET_SL_PERCENTAGE', 15),
 
     // Auto-pause thresholds — wallet is paused if ANY rule triggers.
+    'auto_pause_enabled' => env('POLYMARKET_AUTO_PAUSE_ENABLED', true),
     // Grace period: skip ALL rules until wallet has at least N closed trades.
     'auto_pause_grace_period_trades' => (int) env('POLYMARKET_AUTO_PAUSE_GRACE_PERIOD_TRADES', 10),
     // Rule 1: Deep unrealized loss (absolute).
