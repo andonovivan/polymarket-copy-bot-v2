@@ -72,6 +72,7 @@ return [
     'category_pop_culture' => env('POLYMARKET_CATEGORY_POP_CULTURE', true),
     'category_business' => env('POLYMARKET_CATEGORY_BUSINESS', true),
     'category_science' => env('POLYMARKET_CATEGORY_SCIENCE', true),
+    'category_other' => env('POLYMARKET_CATEGORY_OTHER', true),
 
     // Mapping of category keys to Polymarket event tag slugs.
     'market_category_tags' => [

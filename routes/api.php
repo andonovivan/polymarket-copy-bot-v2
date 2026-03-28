@@ -29,6 +29,7 @@ Route::post('/global-pause', [GlobalPauseController::class, 'toggle']);
 Route::put('/balance', [BalanceController::class, 'update']);
 Route::get('/wallet-report', [WalletReportController::class, 'index']);
 Route::get('/wallet-report/summary', [WalletReportController::class, 'summary']);
+Route::get('/category-report', [WalletReportController::class, 'categoryReport']);
 Route::get('/discover', [DiscoverController::class, 'index']);
 Route::post('/discover', [DiscoverController::class, 'store']);
 Route::get('/settings', [SettingsController::class, 'index']);

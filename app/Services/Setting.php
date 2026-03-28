@@ -69,6 +69,7 @@ class Setting
         'category_pop_culture' => ['type' => 'bool', 'label' => 'Pop Culture', 'group' => 'categories'],
         'category_business' => ['type' => 'bool', 'label' => 'Business & Finance', 'group' => 'categories'],
         'category_science' => ['type' => 'bool', 'label' => 'Science & Weather', 'group' => 'categories'],
+        'category_other' => ['type' => 'bool', 'label' => 'Other / Uncategorized', 'group' => 'categories'],
     ];
 
     /**

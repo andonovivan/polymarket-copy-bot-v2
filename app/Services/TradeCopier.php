@@ -765,7 +765,7 @@ class TradeCopier
     private function isCategoryBlocked(string $assetId): bool
     {
         // Quick bail: check if any category is actually disabled.
-        $categoryKeys = ['crypto', 'politics', 'sports', 'pop_culture', 'business', 'science'];
+        $categoryKeys = ['crypto', 'politics', 'sports', 'pop_culture', 'business', 'science', 'other'];
         $disabledCategories = [];
         foreach ($categoryKeys as $cat) {
             if (! Setting::get("category_{$cat}", true)) {
@@ -779,23 +779,26 @@ class TradeCopier
 
         // Fetch metadata (usually cached).
         $meta = $this->client->getMarketMetadata($assetId);
-        if (! $meta || empty($meta['tags'])) {
-            return false; // Allow unknown/untagged markets.
+        $tags = $meta['tags'] ?? [];
+
+        // Map tags to the primary category for this market.
+        $tagMapping = config('polymarket.market_category_tags', []);
+        $matchedCategory = 'other';
+        foreach ($tagMapping as $cat => $categoryTags) {
+            if (! empty(array_intersect($tags, $categoryTags))) {
+                $matchedCategory = $cat;
+                break;
+            }
         }
 
-        // Map tags to categories and check if any match a disabled category.
-        $tagMapping = config('polymarket.market_category_tags', []);
-        foreach ($disabledCategories as $category) {
-            $categoryTags = $tagMapping[$category] ?? [];
-            if (! empty(array_intersect($meta['tags'], $categoryTags))) {
-                Log::debug('category_blocked', [
-                    'asset_id' => $assetId,
-                    'category' => $category,
-                    'tags' => $meta['tags'],
-                ]);
+        if (in_array($matchedCategory, $disabledCategories)) {
+            Log::debug('category_blocked', [
+                'asset_id' => $assetId,
+                'category' => $matchedCategory,
+                'tags' => $tags,
+            ]);
 
-                return true;
-            }
+            return true;
         }
 
         return false;
