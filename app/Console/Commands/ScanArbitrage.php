@@ -43,8 +43,8 @@ class ScanArbitrage extends Command
             'best_event' => $opportunities[0]['event_title'],
         ]);
 
-        // Auto-trade if enabled.
-        if (Setting::get('arb_auto_trade', false) && ! Setting::get('dry_run', true)) {
+        // Auto-trade if enabled (works in both dry-run and live mode).
+        if (Setting::get('arb_auto_trade', false)) {
             $minAutoSpread = (float) Setting::get('arb_min_auto_trade_spread', 0.05);
             $tradeAmount = (float) Setting::get('arb_trade_amount', 5.0);
 

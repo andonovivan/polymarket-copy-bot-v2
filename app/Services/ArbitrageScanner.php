@@ -202,6 +202,7 @@ class ArbitrageScanner
             $position->exposure = ($position->exposure ?? 0) + ($fillPrice * $shares);
             $position->copied_from_wallet = 'arb:scanner';
             $position->market_slug = $market['slug'];
+            // market_question, market_image, outcome backfilled by bot:update-prices (20 per cycle).
 
             if (! $position->opened_at || $oldShares <= 0) {
                 $position->opened_at = now();

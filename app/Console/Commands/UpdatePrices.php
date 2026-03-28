@@ -168,14 +168,14 @@ class UpdatePrices extends Command
             }
         }
 
-        // Backfill market metadata for positions missing any field (max 5 per cycle).
+        // Backfill market metadata for positions missing any field (max 20 per cycle).
         $missingMeta = Position::where('shares', '>', 0)
             ->where(function ($q) {
                 $q->whereNull('market_slug')
                   ->orWhereNull('market_question')
                   ->orWhereNull('outcome');
             })
-            ->limit(5)
+            ->limit(20)
             ->get();
 
         foreach ($missingMeta as $pos) {
