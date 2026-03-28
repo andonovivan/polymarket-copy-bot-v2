@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { router } from '@inertiajs/vue3';
 import BalanceBar from '../Components/BalanceBar.vue';
 import StatsCards from '../Components/StatsCards.vue';
 import StatsFilter from '../Components/StatsFilter.vue';
@@ -187,6 +188,10 @@ function fmtTime(ts) {
                     <button @click="closeAllPositions" :disabled="closeAllLoading || (data?.open_positions_count ?? 0) === 0"
                             class="text-sm font-semibold px-4 py-2 rounded bg-red-700 hover:bg-red-600 text-white transition-colors disabled:opacity-50">
                         {{ closeAllLoading ? 'Closing...' : 'Close All' }}
+                    </button>
+                    <button @click="router.post('/logout')"
+                            class="text-sm px-3 py-2 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+                        Logout
                     </button>
                 </div>
             </div>

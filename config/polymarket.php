@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'dashboard_password' => env('DASHBOARD_PASSWORD', ''),
     'clob_api_url' => env('POLYMARKET_CLOB_API_URL', 'https://clob.polymarket.com'),
     'data_api_url' => env('POLYMARKET_DATA_API_URL', 'https://data-api.polymarket.com'),
     'chain_id' => (int) env('POLYMARKET_CHAIN_ID', 137),

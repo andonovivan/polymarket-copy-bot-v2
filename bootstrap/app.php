@@ -15,6 +15,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             \Inertia\Middleware::class,
         ]);
+
+        // Add session + cookie support to API routes so SimpleAuth can check the session.
+        $middleware->api(prepend: [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+            \Illuminate\Session\Middleware\StartSession::class,
+            \App\Http\Middleware\SimpleAuth::class,
+        ]);
+
+        $middleware->alias([
+            'simple.auth' => \App\Http\Middleware\SimpleAuth::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
