@@ -19,6 +19,7 @@ class TradeHistory extends Model
         'sell_price',
         'shares',
         'pnl',
+        'exit_reason',
         'opened_at',
         'closed_at',
     ];

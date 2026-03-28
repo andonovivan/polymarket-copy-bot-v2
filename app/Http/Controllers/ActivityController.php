@@ -37,16 +37,17 @@ class ActivityController extends Controller
 
         // Sub-query 1: Buy events from open positions.
         $positionBuys = DB::table('positions')
-            ->selectRaw("CONCAT('pb:', id) as row_id, 'Buy' as type, asset_id, market_slug, market_question, market_image, outcome, buy_price as price, shares, ROUND(buy_price * shares, 2) as amount, UNIX_TIMESTAMP(opened_at) as event_ts, copied_from_wallet")
+            ->selectRaw("CONCAT('pb:', id) as row_id, 'Buy' as type, asset_id, market_slug, market_question, market_image, outcome, buy_price as price, shares, ROUND(buy_price * shares, 2) as amount, UNIX_TIMESTAMP(opened_at) as event_ts, copied_from_wallet, NULL as exit_reason")
             ->where('shares', '>', 0);
 
         // Sub-query 2: Buy events from closed trades.
         $tradeBuys = DB::table('trade_history')
-            ->selectRaw("CONCAT('tb:', id) as row_id, 'Buy' as type, asset_id, market_slug, market_question, market_image, outcome, buy_price as price, shares, ROUND(buy_price * shares, 2) as amount, UNIX_TIMESTAMP(opened_at) as event_ts, copied_from_wallet");
+            ->selectRaw("CONCAT('tb:', id) as row_id, 'Buy' as type, asset_id, market_slug, market_question, market_image, outcome, buy_price as price, shares, ROUND(buy_price * shares, 2) as amount, UNIX_TIMESTAMP(opened_at) as event_ts, copied_from_wallet, NULL as exit_reason");
 
         // Sub-query 3: Sell/Redeem events from closed trades.
+        // Type is determined by exit_reason: resolved → Redeem, tp/sl/age → specific label, else → Sell.
         $tradeSells = DB::table('trade_history')
-            ->selectRaw("CONCAT('ts:', id) as row_id, CASE WHEN sell_price >= 0.999 OR sell_price <= 0.001 THEN 'Redeem' ELSE 'Sell' END as type, asset_id, market_slug, market_question, market_image, outcome, sell_price as price, shares, ROUND(sell_price * shares, 2) as amount, UNIX_TIMESTAMP(closed_at) as event_ts, copied_from_wallet");
+            ->selectRaw("CONCAT('ts:', id) as row_id, CASE WHEN exit_reason = 'resolved' OR sell_price >= 0.999 OR sell_price <= 0.001 THEN 'Redeem' WHEN exit_reason = 'tp_exit' THEN 'TP Exit' WHEN exit_reason = 'sl_exit' THEN 'SL Exit' WHEN exit_reason = 'age_exit' THEN 'Age Exit' ELSE 'Sell' END as type, asset_id, market_slug, market_question, market_image, outcome, sell_price as price, shares, ROUND(sell_price * shares, 2) as amount, UNIX_TIMESTAMP(closed_at) as event_ts, copied_from_wallet, exit_reason");
 
         // Apply wallet filter.
         if (! empty($wallets)) {

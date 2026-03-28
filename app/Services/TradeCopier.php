@@ -71,7 +71,7 @@ class TradeCopier
                 'pnl' => $pnl,
             ]);
 
-            $this->recordPnl($assetId, $buyPrice, $sellPrice, $shares);
+            $this->recordPnl($assetId, $buyPrice, $sellPrice, $shares, 'resolved');
 
             $position->shares = 0;
             $position->exposure = 0;
@@ -364,7 +364,7 @@ class TradeCopier
                 $marketMeta = $this->client->getMarketMetadata($trade->assetId);
                 $this->applyBuyFill($trade->assetId, $fillPrice, $fixedSize, $trade->wallet, $marketMeta, now());
             } else {
-                $this->applySellFill($trade->assetId, $fillPrice, $fixedSize);
+                $this->applySellFill($trade->assetId, $fillPrice, $fixedSize, 'copy_sell');
             }
 
             Log::info('trade_copied', [
@@ -490,7 +490,7 @@ class TradeCopier
      * If the order goes live/delayed, a PendingOrder is created and the position
      * remains open until the sell fills.
      */
-    public function closePosition(string $assetId): array
+    public function closePosition(string $assetId, ?string $exitReason = 'manual'): array
     {
         $position = Position::where('asset_id', $assetId)->first();
         if (! $position || $position->shares <= 0) {
@@ -515,7 +515,7 @@ class TradeCopier
             $buyPrice = (float) $position->buy_price;
             $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
 
-            $this->applySellFill($assetId, $sellPrice, $shares);
+            $this->applySellFill($assetId, $sellPrice, $shares, $exitReason);
 
             Log::info('position_manually_closed', [
                 'asset_id' => substr($assetId, 0, 16) . '...',
@@ -659,7 +659,7 @@ class TradeCopier
 
             if ($status === 'matched' || $status === 'dry_run') {
                 $sellPrice = (float) $result['fill_price'];
-                $this->applySellFill($position->asset_id, $sellPrice, $shares);
+                $this->applySellFill($position->asset_id, $sellPrice, $shares, 'reconcile');
                 Log::info('reconcile_sold', [
                     'asset_id' => substr($position->asset_id, 0, 16) . '...',
                     'shares' => $shares,
@@ -761,12 +761,12 @@ class TradeCopier
     /**
      * Apply a confirmed SELL fill to the position: record P&L, zero out shares.
      */
-    private function applySellFill(string $assetId, float $fillPrice, float $size): void
+    private function applySellFill(string $assetId, float $fillPrice, float $size, ?string $exitReason = null): void
     {
         $position = Position::where('asset_id', $assetId)->first();
         $buyPrice = $position ? (float) $position->buy_price : 0.0;
 
-        $this->recordPnl($assetId, $buyPrice, $fillPrice, $size);
+        $this->recordPnl($assetId, $buyPrice, $fillPrice, $size, $exitReason);
 
         if ($position) {
             $sellValue = $size * $fillPrice;
@@ -1010,7 +1010,7 @@ class TradeCopier
     /**
      * Record a realized trade P&L.
      */
-    private function recordPnl(string $assetId, float $buyPrice, float $sellPrice, float $shares): void
+    private function recordPnl(string $assetId, float $buyPrice, float $sellPrice, float $shares, ?string $exitReason = null): void
     {
         $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
 
@@ -1043,6 +1043,7 @@ class TradeCopier
             'sell_price' => $sellPrice,
             'shares' => $shares,
             'pnl' => $pnl,
+            'exit_reason' => $exitReason,
             'opened_at' => $openedAt,
             'closed_at' => now(),
         ]);

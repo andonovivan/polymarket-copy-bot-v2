@@ -56,6 +56,9 @@ function pnlPct(row) {
 function typeClass(type) {
     if (type === 'Buy') return 'text-green-400';
     if (type === 'Sell') return 'text-red-400';
+    if (type === 'TP Exit') return 'text-emerald-400';
+    if (type === 'SL Exit') return 'text-orange-400';
+    if (type === 'Age Exit') return 'text-yellow-400';
     return 'text-gray-400'; // Redeem
 }
 

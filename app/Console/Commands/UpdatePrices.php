@@ -130,7 +130,7 @@ class UpdatePrices extends Command
                         'current_price' => $pos->current_price,
                         'tp_price' => $pos->tp_price,
                     ]);
-                    $copier->closePosition($pos->asset_id);
+                    $copier->closePosition($pos->asset_id, 'tp_exit');
                 } elseif ($pos->sl_price && $pos->current_price <= $pos->sl_price) {
                     Log::info('sl_exit_triggered', [
                         'asset_id' => $pos->asset_id,
@@ -138,7 +138,7 @@ class UpdatePrices extends Command
                         'current_price' => $pos->current_price,
                         'sl_price' => $pos->sl_price,
                     ]);
-                    $copier->closePosition($pos->asset_id);
+                    $copier->closePosition($pos->asset_id, 'sl_exit');
                 }
             }
         }
@@ -164,7 +164,7 @@ class UpdatePrices extends Command
                     'current_price' => $pos->current_price,
                     'buy_price' => $pos->buy_price,
                 ]);
-                $copier->closePosition($pos->asset_id);
+                $copier->closePosition($pos->asset_id, 'age_exit');
             }
         }
 
