@@ -7,6 +7,7 @@ import ActivityTable from '../Components/ActivityTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
 import WalletReport from '../Components/WalletReport.vue';
 import WalletDiscovery from '../Components/WalletDiscovery.vue';
+import ArbitrageScanner from '../Components/ArbitrageScanner.vue';
 import Settings from '../Components/Settings.vue';
 
 const activeTab = ref('dashboard');
@@ -36,6 +37,7 @@ const tableFilterParams = computed(() => {
 const dashboardRefresh = ref(0);
 const walletsRefresh = ref(0);
 const reportRefresh = ref(0);
+const arbRefresh = ref(0);
 
 let interval = null;
 
@@ -90,6 +92,7 @@ function refresh() {
     if (activeTab.value === 'dashboard') dashboardRefresh.value++;
     else if (activeTab.value === 'wallets') walletsRefresh.value++;
     else if (activeTab.value === 'report') reportRefresh.value++;
+    else if (activeTab.value === 'arbitrage') arbRefresh.value++;
 }
 
 async function toggleGlobalPause() {
@@ -132,6 +135,7 @@ watch(activeTab, (newTab) => {
     if (newTab === 'dashboard') dashboardRefresh.value++;
     else if (newTab === 'wallets') walletsRefresh.value++;
     else if (newTab === 'report') reportRefresh.value++;
+    else if (newTab === 'arbitrage') arbRefresh.value++;
 });
 
 onMounted(() => {
@@ -155,7 +159,7 @@ function fmtTime(ts) {
             <div class="flex items-start justify-between mb-1">
                 <div>
                     <h1 class="text-2xl font-bold text-blue-400">
-                        Polymarket Copy Bot
+                        Polymarket Bot
                         <span v-if="data?.dry_run"
                               class="ml-2 text-xs bg-yellow-600 text-gray-950 px-2 py-0.5 rounded font-bold align-middle">
                             DRY RUN
@@ -206,6 +210,10 @@ function fmtTime(ts) {
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'discover' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
                     Discover
                 </button>
+                <button @click="activeTab = 'arbitrage'"
+                        :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'arbitrage' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
+                    Arbitrage
+                </button>
                 <button @click="activeTab = 'settings'"
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'settings' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
                     Settings
@@ -238,6 +246,12 @@ function fmtTime(ts) {
             <div v-if="activeTab === 'discover'">
                 <h2 class="text-blue-400 text-base mb-3">Discover Top Traders</h2>
                 <WalletDiscovery @refresh="refresh" />
+            </div>
+
+            <!-- Arbitrage Tab -->
+            <div v-if="activeTab === 'arbitrage'">
+                <h2 class="text-blue-400 text-base mb-3">Arbitrage Scanner</h2>
+                <ArbitrageScanner :refreshTrigger="arbRefresh" />
             </div>
 
             <!-- Settings Tab -->

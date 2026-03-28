@@ -8,3 +8,4 @@ Schedule::command('bot:check-orders')->everyThirtySeconds()->withoutOverlapping(
 Schedule::command('bot:check-resolved')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('bot:check-wallets')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('bot:discover-wallets')->hourly()->withoutOverlapping();
+Schedule::command('bot:scan-arb')->everyFiveMinutes()->withoutOverlapping();

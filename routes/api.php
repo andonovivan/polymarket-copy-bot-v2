@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ActivityController;
+use App\Http\Controllers\ArbitrageController;
 use App\Http\Controllers\BalanceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiscoverController;
@@ -32,6 +33,7 @@ Route::get('/wallet-report/summary', [WalletReportController::class, 'summary'])
 Route::get('/category-report', [WalletReportController::class, 'categoryReport']);
 Route::get('/discover', [DiscoverController::class, 'index']);
 Route::post('/discover', [DiscoverController::class, 'store']);
+Route::get('/arbitrage', [ArbitrageController::class, 'index']);
 Route::get('/settings', [SettingsController::class, 'index']);
 Route::put('/settings', [SettingsController::class, 'update']);
 Route::delete('/settings/{key}', [SettingsController::class, 'destroy']);

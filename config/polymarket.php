@@ -86,6 +86,13 @@ return [
     'category_science' => env('POLYMARKET_CATEGORY_SCIENCE', true),
     'category_other' => env('POLYMARKET_CATEGORY_OTHER', true),
 
+    // Arbitrage scanner — detect mispriced grouped markets.
+    'arb_enabled' => env('POLYMARKET_ARB_ENABLED', true),
+    'arb_min_spread' => (float) env('POLYMARKET_ARB_MIN_SPREAD', 0.02),
+    'arb_auto_trade' => env('POLYMARKET_ARB_AUTO_TRADE', false),
+    'arb_trade_amount' => (float) env('POLYMARKET_ARB_TRADE_AMOUNT', 5.0),
+    'arb_min_auto_trade_spread' => (float) env('POLYMARKET_ARB_MIN_AUTO_TRADE_SPREAD', 0.05),
+
     // Mapping of category keys to Polymarket event tag slugs.
     'market_category_tags' => [
         'crypto' => ['crypto', 'airdrops'],

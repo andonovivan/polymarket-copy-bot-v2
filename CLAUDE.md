@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this codebase.
 
 ## Project Overview
 
-Polymarket Copy Bot v2 is a Laravel application that automatically copies trades from tracked Polymarket traders. It monitors wallet addresses, detects new trades via the Polymarket Data API, and replicates them using the CLOB (Central Limit Order Book) API. It includes a Vue.js dashboard for real-time P&L tracking and wallet management.
+Polymarket Bot is a Laravel application for automated trading on Polymarket. It copies trades from tracked top traders and runs an independent arbitrage scanner that detects mispriced grouped markets. It monitors wallet addresses, detects new trades via the Polymarket Data API, and replicates them using the CLOB (Central Limit Order Book) API. The arbitrage scanner fetches negRisk events from the Gamma API and identifies opportunities where outcome prices deviate from their expected sum. It includes a Vue.js dashboard for real-time P&L tracking, wallet management, and arbitrage monitoring.
 
 ## Development Commands
 
@@ -43,6 +43,7 @@ npm run build                    # Build frontend assets
 | `bot:check-resolved` | Every 5 min | Close positions in resolved markets           |
 | `bot:check-wallets`  | Every 5 min | Auto-pause wallets with poor performance      |
 | `bot:discover-wallets` | Every hour | Auto-discover top traders from Polymarket leaderboard |
+| `bot:scan-arb`   | Every 5 min | Scan negRisk grouped markets for arbitrage opportunities |
 
 ### Services (`app/Services/`)
 
@@ -51,7 +52,8 @@ npm run build                    # Build frontend assets
 - **TradeTracker** - Polls Polymarket Data API for new trades from active (non-paused) wallets. Uses **rate-limited batched requests**: wallets are split into batches (default 15), each batch fires concurrently via `Http::pool`, with configurable delay between batches (default 500ms) to avoid 429 rate limiting. Wallets that receive a 429 are retried once after all primary batches complete. Uses **per-wallet timestamp watermarks** (`last_trade_ts` on `TrackedWallet`) for deduplication — only trades with a timestamp strictly greater than the wallet's watermark are treated as new. Newly added wallets (null watermark) are seeded on first poll: the watermark is set to the highest trade timestamp without copying any trades. **Tiered polling**: wallets with `last_trade_ts` older than N days (default 3 via `POLYMARKET_INACTIVE_WALLET_DAYS`) are considered inactive and only polled once per hour (configurable via `POLYMARKET_INACTIVE_POLL_INTERVAL_SECONDS`). If an inactive wallet trades again, its watermark updates and it automatically returns to the active tier. This significantly reduces API load when many tracked wallets are dormant.
 - **WalletScoring** - Computes advanced per-wallet metrics: profit factor, rolling-N expectancy, max drawdown %, consistency, and composite score (0-100). Single-query approach: fetches all trade_history ordered by wallet+closed_at, processes in PHP. Weighted score: Profit Factor 25%, Rolling Expectancy 25%, Win Rate 20%, Max Drawdown 15%, Consistency 15%. `computeKellyFraction(walletAddress)` returns the raw Kelly Criterion optimal fraction for a single wallet (win_rate - (1-win_rate) / (avgWin/avgLoss)), capped [0,1]. Returns null if fewer than `kelly_min_trades` closed trades. Used by both CheckWallets (auto-pause rules 5-6), WalletReportController (score display), and TradeCopier (Kelly sizing).
 - **LeaderboardDiscovery** - Fetches top traders from Polymarket leaderboard API (`/v1/leaderboard`). Filters by min PNL/volume thresholds, skips already-tracked wallets. Used by both the scheduled `bot:discover-wallets` command and `GET/POST /api/discover` endpoints.
-- **Setting** - Runtime-configurable settings with DB override and env/config fallback. Stores overrides in `BotMeta` with `setting:` key prefix. `Setting::get($key)` checks BotMeta first, falls back to `config('polymarket.{key}')`. Exposes a schema of 50 configurable parameters across 6 groups (sizing, limits, behavior, polling, auto_pause, categories). Includes `fixed_amount_override` — when set, bypasses dynamic sizing and uses a fixed USDC amount for all BUY trades. The auto_pause group exposes all 11 auto-pause thresholds (grace period, unrealized loss, exposure ratio, bad record, zero wins, rolling expectancy, profit factor). Used by TradeCopier, TradeTracker, BotPoll, CheckWallets, and controllers instead of direct `config()` calls for the exposed settings.
+- **ArbitrageScanner** - Scans Polymarket for arbitrage opportunities in negRisk grouped markets (mutually exclusive outcomes). `scan()` fetches all active negRisk events from Gamma API (paginated, cached 60s), sums Yes prices per event, reports deviations from 1.0 above `arb_min_spread` threshold (default 2%). `execute($opportunity, $amount)` places trades: for underround (sum < 1.0), buys Yes on all outcomes; for overround (sum > 1.0), buys No on the cheapest outcome. Positions from arb trades use `copied_from_wallet = 'arb:scanner'` to distinguish from copy trades. Reuses existing `PolymarketClient::placeOrder()` and Position model.
+- **Setting** - Runtime-configurable settings with DB override and env/config fallback. Stores overrides in `BotMeta` with `setting:` key prefix. `Setting::get($key)` checks BotMeta first, falls back to `config('polymarket.{key}')`. Exposes a schema of 55 configurable parameters across 7 groups (sizing, limits, behavior, polling, auto_pause, categories). Includes `fixed_amount_override` — when set, bypasses dynamic sizing and uses a fixed USDC amount for all BUY trades. The auto_pause group exposes all 11 auto-pause thresholds (grace period, unrealized loss, exposure ratio, bad record, zero wins, rolling expectancy, profit factor). Used by TradeCopier, TradeTracker, BotPoll, CheckWallets, and controllers instead of direct `config()` calls for the exposed settings.
 
 ### Controllers (`app/Http/Controllers/`)
 
@@ -63,6 +65,7 @@ npm run build                    # Build frontend assets
 - **WalletController** - CRUD for tracked wallets: `GET /api/wallets` (list), `POST /api/wallets` (add), `PUT /api/wallets` (update name/slug), `PATCH /api/wallets/pause` (pause/resume), `DELETE /api/wallets` (remove), `DELETE /api/wallets/bulk` (bulk delete by address array), `PATCH /api/wallets/bulk-pause` (bulk pause/resume by address array).
 - **BalanceController** - `PUT /api/balance` updates the trading balance limit. Validates that limit cannot exceed real Polymarket balance when not in dry-run mode.
 - **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
+- **ArbitrageController** - `GET /api/arbitrage` returns current arbitrage scan results (opportunities list with deviation %).
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
 - **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default. `POST /api/reset-data` resets all data (positions, trades, pending orders, seen trades, PnlSummary, BotMeta runtime keys, wallet watermarks) while keeping tracked wallets and settings intact.
 
@@ -91,6 +94,7 @@ npm run build                    # Build frontend assets
 - **TradeHistoryTable.vue** - Legacy component (replaced by ActivityTable on the Dashboard). Uses DataTable with `apiUrl="/api/trades"`.
 - **WalletsManager.vue** - Add/edit/remove tracked wallets with inline editing for name and profile slug. Pause/Resume toggle per wallet with badge showing manual vs auto-pause. Checkbox selection with select-all-on-page, bulk Pause/Resume/Delete actions for selected wallets. Self-fetching from `GET /api/wallets`. Client-side pagination with per-page selector.
 - **WalletReport.vue** - Two sub-views toggled via "By Wallet" / "By Category" tabs. **By Wallet**: Uses DataTable with `apiUrl="/api/wallet-report"`. Summary cards fetched independently from `GET /api/wallet-report/summary` (totals across all wallets, not just current page). Composite score column (0-100) with color gradient and hover tooltip showing score breakdown (profit factor, expectancy, win rate, drawdown, consistency). Pause/Resume buttons and win rate coloring. **By Category**: Uses DataTable with `apiUrl="/api/category-report"`. Shows per-category P&L, win rate, trade counts, invested, and enabled/disabled status. Enable/Disable buttons toggle category settings via `PUT /api/settings`.
+- **ArbitrageScanner.vue** - Arbitrage scanner UI. Fetches from `GET /api/arbitrage`. Shows summary cards (opportunity count, best spread, last scan time) and opportunities table with event title (linked to Polymarket), outcome count, price sum, deviation %, and type badge (Over/Under). "Scan Now" button for manual refresh.
 - **WalletDiscovery.vue** - Leaderboard discovery UI. "Scan Leaderboard" button fetches candidates from `GET /api/discover` with configurable time period and category dropdowns. Shows ranked table with PNL, volume, Add/Tracked badges. "Add All" for bulk-add.
 - **Settings.vue** - Bot settings UI with grouped form sections (Trade Sizing, Risk Limits, Trade Behavior, Polling, Auto-Pause Rules, Market Categories). Each setting shows current value, env default, and "custom" badge when overridden. Boolean settings use toggle switches. "Save Changes" button with dirty-state tracking. Per-field "reset" to revert to env default. Fixed Amount Override toggle at the top of sizing section — when set, bypasses all dynamic sizing logic. Auto-Pause Rules section exposes all 11 thresholds (grace period, unrealized loss, exposure ratio, bad record, zero wins, rolling expectancy, profit factor) — description notes that grace period skips rules 3-6 until enough trades. Danger Zone section with "Reset All Data" button (confirmation dialog) that clears all positions, trades, and stats while keeping wallets and settings.
 
@@ -150,6 +154,11 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_DISCOVER_CATEGORY` | OVERALL                         | Leaderboard category filter                   |
 | `POLYMARKET_DISCOVER_LIMIT` | 20                                 | Max candidates to fetch per scan              |
 | `POLYMARKET_DISCOVER_MAX_AUTO_ADD` | 3                            | Max wallets auto-added per scheduled run      |
+| `POLYMARKET_ARB_ENABLED`    | true                            | Enable arbitrage scanner                      |
+| `POLYMARKET_ARB_MIN_SPREAD` | 0.02                            | Min deviation to report (2%)                  |
+| `POLYMARKET_ARB_AUTO_TRADE` | false                           | Auto-execute arbitrage trades                 |
+| `POLYMARKET_ARB_TRADE_AMOUNT` | 5                             | USDC per arbitrage opportunity                |
+| `POLYMARKET_ARB_MIN_AUTO_TRADE_SPREAD` | 0.05                 | Min deviation to auto-trade (5%)              |
 | `POLYMARKET_CATEGORY_CRYPTO`    | true                           | Enable/disable Crypto market trades           |
 | `POLYMARKET_CATEGORY_POLITICS`  | true                           | Enable/disable Politics market trades         |
 | `POLYMARKET_CATEGORY_SPORTS`    | true                           | Enable/disable Sports market trades           |
@@ -242,6 +251,7 @@ app/
     CheckResolved.php        # bot:check-resolved - close resolved positions
     CheckWallets.php         # bot:check-wallets - auto-pause poor performers
     DiscoverWallets.php      # bot:discover-wallets - auto-discover top traders
+    ScanArbitrage.php        # bot:scan-arb - scan for arbitrage opportunities
     MigrateFromPython.php    # bot:migrate-from-python - one-time import
     UpdatePrices.php         # bot:update-prices - cache midpoints in DB
   DTOs/
@@ -250,6 +260,7 @@ app/
     ActivityController.php   # GET /api/activity - unified chronological activity feed
     BalanceController.php    # PUT /api/balance - trading balance limit
     DashboardController.php  # Dashboard page + /api/data (summary stats only)
+    ArbitrageController.php  # GET /api/arbitrage - arbitrage scan results
     DiscoverController.php   # GET/POST /api/discover - leaderboard discovery
     GlobalPauseController.php # POST /api/global-pause - toggle bot pause
     PositionController.php   # GET /api/positions (paginated) + POST /api/close + POST /api/close-all
@@ -266,6 +277,7 @@ app/
     TrackedWallet.php        # Tracked wallet addresses (with pause state + last_trade_ts watermark)
     TradeHistory.php         # Closed trade records
   Services/
+    ArbitrageScanner.php     # Arbitrage detection + execution for grouped markets
     LeaderboardDiscovery.php # Leaderboard API + wallet discovery
     WalletScoring.php        # Composite score + advanced metrics per wallet
     PolymarketClient.php     # CLOB/Gamma API integration
