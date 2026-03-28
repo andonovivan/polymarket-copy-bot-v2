@@ -108,6 +108,7 @@ All trading parameters are configurable via `.env`:
 | `POLYMARKET_MAX_POSITION_USDC`| 10                              | Max exposure per market              |
 | `POLYMARKET_MAX_WALLET_EXPOSURE_USDC` | 20                      | Max total exposure per tracked wallet |
 | `POLYMARKET_PRICE_TOLERANCE`  | 0.03                            | Max price deviation before skipping  |
+| `POLYMARKET_MAX_TRADE_AGE_SECONDS` | 30                         | Skip trades older than N seconds     |
 | `POLYMARKET_COPY_SELLS`       | true                            | Also replicate sell trades           |
 | `POLYMARKET_TRADE_COALESCE_WINDOW_SECONDS` | 5                  | Time window to merge multi-fill trades from same order |
 | `POLYMARKET_DRY_RUN`          | true                            | Log only, no real orders             |
@@ -180,7 +181,8 @@ All trading parameters are configurable via `.env`:
 2. Detect new trades from active (non-paused) tracked wallets
 3. **Coalesce multi-fill trades** — group by (wallet + asset + side) within 5s window, merge into single trade with VWAP and summed size
 4. Filter: skip sells if disabled, skip below min price ($0.05)
-5. **Market category filter** (BUY only): fetch event tags via `getMarketMetadata()`, check against disabled categories in settings. Skip if market belongs to a disabled category (Crypto, Politics, Sports, Pop Culture, Business, Science). Unknown/untagged markets are allowed through.
+5. **Trade freshness filter**: skip if trade is older than `max_trade_age_seconds` (default 30s) — reduces price divergence between original and copy
+6. **Market category filter** (BUY only): fetch event tags via `getMarketMetadata()`, check against disabled categories in settings. Skip if market belongs to a disabled category (Crypto, Politics, Sports, Pop Culture, Business, Science). Unknown/untagged markets are allowed through.
 6. Calculate size: dynamic amount based on wallet score and available balance (hybrid % with min/max caps), all held shares for sells
 6. Price sanity: skip if midpoint deviates > 3 cents from trade price
 7. Trading balance limit: skip if trade amount exceeds available capital (limit - invested + realized P&L)

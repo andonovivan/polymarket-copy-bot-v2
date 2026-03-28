@@ -127,6 +127,22 @@ class TradeCopier
             return false;
         }
 
+        // --- Trade freshness filter ---
+        // Skip trades that are too old — reduces price divergence between original and copy.
+        $maxAge = (int) Setting::get('max_trade_age_seconds', 30);
+        if ($maxAge > 0 && $trade->timestamp > 0) {
+            $age = time() - $trade->timestamp;
+            if ($age > $maxAge) {
+                Log::info('skipped_stale_trade', [
+                    'trade_id' => $trade->tradeId,
+                    'age_seconds' => $age,
+                    'max' => $maxAge,
+                ]);
+
+                return false;
+            }
+        }
+
         // --- Market category filter (BUY only) ---
         if ($trade->side === 'BUY' && $this->isCategoryBlocked($trade->assetId)) {
             Log::info('skipped_category_filter', [

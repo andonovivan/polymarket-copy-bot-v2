@@ -13,6 +13,7 @@ return [
     'max_wallet_exposure_usdc' => (float) env('POLYMARKET_MAX_WALLET_EXPOSURE_USDC', 20.0),
     'price_tolerance' => (float) env('POLYMARKET_PRICE_TOLERANCE', 0.03),
     'min_trade_price' => (float) env('POLYMARKET_MIN_TRADE_PRICE', 0.05),
+    'max_trade_age_seconds' => (int) env('POLYMARKET_MAX_TRADE_AGE_SECONDS', 30),
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'poll_batch_size' => (int) env('POLYMARKET_POLL_BATCH_SIZE', 15),

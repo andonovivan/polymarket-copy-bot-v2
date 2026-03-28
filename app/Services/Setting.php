@@ -37,6 +37,7 @@ class Setting
         'min_trade_price' => ['type' => 'float', 'label' => 'Min Trade Price', 'group' => 'limits'],
 
         // Trade Behavior
+        'max_trade_age_seconds' => ['type' => 'int', 'label' => 'Max Trade Age (sec)', 'group' => 'behavior'],
         'copy_sells' => ['type' => 'bool', 'label' => 'Copy Sell Trades', 'group' => 'behavior'],
         'dry_run' => ['type' => 'bool', 'label' => 'Dry Run Mode', 'group' => 'behavior'],
         'pending_order_ttl_minutes' => ['type' => 'int', 'label' => 'Pending Order TTL (min)', 'group' => 'behavior'],
