@@ -47,6 +47,8 @@ class Setting
         'dry_run' => ['type' => 'bool', 'label' => 'Dry Run Mode', 'group' => 'behavior'],
         'pending_order_ttl_minutes' => ['type' => 'int', 'label' => 'Pending Order TTL (min)', 'group' => 'behavior'],
         'trade_coalesce_window_seconds' => ['type' => 'int', 'label' => 'Trade Coalesce Window (sec)', 'group' => 'behavior'],
+        'max_position_age_hours' => ['type' => 'int', 'label' => 'Max Position Age (hours)', 'group' => 'behavior'],
+        'max_market_duration_days' => ['type' => 'int', 'label' => 'Max Market Duration (days)', 'group' => 'behavior'],
         'enable_tp_sl' => ['type' => 'bool', 'label' => 'Take-Profit / Stop-Loss', 'group' => 'behavior'],
         'tp_percentage' => ['type' => 'float', 'label' => 'Take-Profit %', 'group' => 'behavior'],
         'sl_percentage' => ['type' => 'float', 'label' => 'Stop-Loss %', 'group' => 'behavior'],

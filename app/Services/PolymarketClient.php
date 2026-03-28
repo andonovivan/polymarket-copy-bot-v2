@@ -266,6 +266,7 @@ class PolymarketClient
                         'image' => $image,
                         'outcome' => $outcome,
                         'tags' => $tags,
+                        'end_date' => $market['endDate'] ?? $event['endDate'] ?? null,
                     ];
 
                     Cache::put($cacheKey, $meta, 86400);

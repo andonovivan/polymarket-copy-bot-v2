@@ -153,6 +153,38 @@ class TradeCopier
             return false;
         }
 
+        // --- Market duration filter (BUY only) ---
+        // Skip markets that don't resolve for a long time to avoid capital being stuck.
+        if ($trade->side === 'BUY') {
+            $maxDurationDays = (int) Setting::get('max_market_duration_days', 30);
+            if ($maxDurationDays > 0) {
+                $meta = $this->client->getMarketMetadata($trade->assetId);
+                $endDate = $meta['end_date'] ?? null;
+                if ($endDate) {
+                    try {
+                        $now = new \DateTime;
+                        $end = new \DateTime($endDate);
+                        if ($end > $now) {
+                            $daysUntilEnd = (int) $now->diff($end)->days;
+                            if ($daysUntilEnd > $maxDurationDays) {
+                                Log::info('skipped_long_duration', [
+                                    'trade_id' => $trade->tradeId,
+                                    'asset_id' => $trade->assetId,
+                                    'end_date' => $endDate,
+                                    'days_until_end' => $daysUntilEnd,
+                                    'max_days' => $maxDurationDays,
+                                ]);
+
+                                return false;
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        // Invalid date format — skip filter, don't block.
+                    }
+                }
+            }
+        }
+
         // --- Fetch midpoint (used by momentum filter + price tolerance) ---
         $midpoint = $this->client->getMidpoint($trade->assetId);
 

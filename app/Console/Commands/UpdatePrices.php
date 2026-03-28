@@ -111,6 +111,31 @@ class UpdatePrices extends Command
             }
         }
 
+        // --- Max position age auto-close ---
+        $maxAgeHours = (int) Setting::get('max_position_age_hours', 72);
+        if ($maxAgeHours > 0) {
+            if (! isset($copier)) {
+                $copier = app(TradeCopier::class);
+            }
+            $cutoff = now()->subHours($maxAgeHours);
+            $stalePositions = Position::where('shares', '>', 0)
+                ->whereNotNull('opened_at')
+                ->where('opened_at', '<', $cutoff)
+                ->get();
+
+            foreach ($stalePositions as $pos) {
+                Log::info('age_exit_triggered', [
+                    'asset_id' => $pos->asset_id,
+                    'opened_at' => $pos->opened_at->toIso8601String(),
+                    'age_hours' => round(now()->diffInMinutes($pos->opened_at) / 60, 1),
+                    'max_hours' => $maxAgeHours,
+                    'current_price' => $pos->current_price,
+                    'buy_price' => $pos->buy_price,
+                ]);
+                $copier->closePosition($pos->asset_id);
+            }
+        }
+
         // Backfill market metadata for positions missing any field (max 5 per cycle).
         $missingMeta = Position::where('shares', '>', 0)
             ->where(function ($q) {

@@ -27,6 +27,8 @@ return [
     'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
 
     // Take-profit / Stop-loss — auto-close positions at thresholds.
+    'max_position_age_hours' => (int) env('POLYMARKET_MAX_POSITION_AGE_HOURS', 72),
+    'max_market_duration_days' => (int) env('POLYMARKET_MAX_MARKET_DURATION_DAYS', 30),
     'enable_tp_sl' => env('POLYMARKET_ENABLE_TP_SL', true),
     'tp_percentage' => (float) env('POLYMARKET_TP_PERCENTAGE', 20),
     'sl_percentage' => (float) env('POLYMARKET_SL_PERCENTAGE', 15),
