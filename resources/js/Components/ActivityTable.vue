@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, fmtDate, timeAgo, shortId, traderLabel, traderUrl, marketUrl } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, fmtDate, timeAgo, shortId, traderLabel, traderUrl, marketUrl, isArbTrade } from '../utils/formatters.js';
 
 const emit = defineEmits(['refresh']);
 const props = defineProps({
@@ -151,7 +151,11 @@ async function closePosition(assetId) {
             </template>
 
             <template #cell-trader_name="{ row }">
-                <a v-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
+                <span v-if="isArbTrade(row)"
+                      class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-900 text-purple-300">
+                    Arb Scanner
+                </span>
+                <a v-else-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
                    class="text-blue-400 hover:text-blue-300 hover:underline text-sm">
                     {{ traderLabel(row) }}
                 </a>
@@ -255,7 +259,11 @@ async function closePosition(assetId) {
 
             <!-- Trader column -->
             <template #cell-trader_name="{ row }">
-                <a v-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
+                <span v-if="isArbTrade(row)"
+                      class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-900 text-purple-300">
+                    Arb Scanner
+                </span>
+                <a v-else-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
                    class="text-blue-400 hover:text-blue-300 hover:underline text-sm">
                     {{ traderLabel(row) }}
                 </a>
