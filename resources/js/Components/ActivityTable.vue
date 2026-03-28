@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref } from 'vue';
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, fmtDate, timeAgo, shortId, traderLabel, traderUrl, marketUrl, isArbTrade } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, timeAgo, shortId, traderLabel, traderUrl, marketUrl, isArbTrade } from '../utils/formatters.js';
 
 const emit = defineEmits(['refresh']);
 const props = defineProps({
@@ -121,7 +121,7 @@ async function closePosition(assetId) {
             <!-- Market cell: image + question + outcome badge + shares -->
             <template #cell-market="{ row }">
                 <div class="flex items-center gap-3 min-w-0">
-                    <img v-if="row.market_image" :src="row.market_image"
+                    <img v-if="row.market_image" :src="row.market_image" alt=""
                          class="w-9 h-9 rounded-full object-cover shrink-0 bg-gray-800"
                          loading="lazy" @error="$event.target.style.display='none'" />
                     <div v-else class="w-9 h-9 rounded-full bg-gray-800 shrink-0 flex items-center justify-center">
@@ -185,7 +185,7 @@ async function closePosition(assetId) {
             </template>
 
             <template #cell-opened_at="{ row }">
-                <span class="text-sm text-gray-400">{{ fmtDate(row.opened_at) }}</span>
+                <span class="text-sm text-gray-400">{{ timeAgo(row.opened_at) }}</span>
             </template>
 
             <template #extra-headers>
@@ -228,7 +228,7 @@ async function closePosition(assetId) {
             <!-- Market cell: image + question + outcome badge with price + shares -->
             <template #cell-market="{ row }">
                 <div class="flex items-center gap-3 min-w-0">
-                    <img v-if="row.market_image" :src="row.market_image"
+                    <img v-if="row.market_image" :src="row.market_image" alt=""
                          class="w-9 h-9 rounded-full object-cover shrink-0 bg-gray-800"
                          loading="lazy" @error="$event.target.style.display='none'" />
                     <div v-else class="w-9 h-9 rounded-full bg-gray-800 shrink-0 flex items-center justify-center">
