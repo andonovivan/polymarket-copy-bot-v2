@@ -88,6 +88,7 @@ class Setting
         'arb_auto_trade' => ['type' => 'bool', 'label' => 'Auto-Trade Opportunities', 'group' => 'arbitrage'],
         'arb_trade_amount' => ['type' => 'float', 'label' => 'Trade Amount (USDC)', 'group' => 'arbitrage'],
         'arb_min_auto_trade_spread' => ['type' => 'float', 'label' => 'Min Spread to Auto-Trade (%)', 'group' => 'arbitrage'],
+        'arb_tp_sl' => ['type' => 'bool', 'label' => 'Apply TP/SL to Arb Trades', 'group' => 'arbitrage'],
     ];
 
     /**

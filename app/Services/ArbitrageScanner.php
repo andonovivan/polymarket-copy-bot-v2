@@ -214,8 +214,9 @@ class ArbitrageScanner
                 $position->buy_price = $fillPrice;
             }
 
-            // Set TP/SL if enabled.
-            if (Setting::get('enable_tp_sl', true)) {
+            // Set TP/SL if enabled (skipped for arb trades by default — arb profits
+            // are locked in at entry and should be held to resolution).
+            if (Setting::get('arb_tp_sl', false) && Setting::get('enable_tp_sl', true)) {
                 $tpPct = (float) Setting::get('tp_percentage', 20);
                 $slPct = (float) Setting::get('sl_percentage', 15);
                 $position->tp_price = round($position->buy_price * (1 + $tpPct / 100), 8);
