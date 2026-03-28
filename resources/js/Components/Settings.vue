@@ -14,6 +14,7 @@ const groups = [
     { key: 'behavior', label: 'Trade Behavior', description: 'Core trade copy behavior.' },
     { key: 'polling', label: 'Polling', description: 'How often and how wallets are polled for trades.' },
     { key: 'auto_pause', label: 'Auto-Pause Rules', description: 'Thresholds for automatically pausing poorly performing wallets. Grace period skips rules 3-6 until enough trades.' },
+    { key: 'categories', label: 'Market Categories', description: 'Enable or disable trading in specific market categories. Disabled categories will skip new BUY trades for markets tagged with that category.' },
 ];
 
 function groupSettings(groupKey) {

@@ -195,7 +195,7 @@ class PolymarketClient
      * Get full market metadata for a CLOB token: slug, question, image, outcome.
      * Cached 24h on success, 1h on failure. Single Gamma API call.
      *
-     * @return array{slug: string, question: string, image: string|null, outcome: string}|null
+     * @return array{slug: string, question: string, image: string|null, outcome: string, tags: string[]}|null
      */
     public function getMarketMetadata(string $tokenId): ?array
     {
@@ -257,11 +257,15 @@ class PolymarketClient
                         }
                     }
 
+                    // Fetch event tags (cached separately per event slug).
+                    $tags = $this->getEventTags($slug);
+
                     $meta = [
                         'slug' => $slug,
                         'question' => $question,
                         'image' => $image,
                         'outcome' => $outcome,
+                        'tags' => $tags,
                     ];
 
                     Cache::put($cacheKey, $meta, 86400);
@@ -274,6 +278,52 @@ class PolymarketClient
         } catch (\Throwable $e) {
             Cache::put($cacheKey, 'UNKNOWN', 3600);
             return null;
+        }
+    }
+
+    /**
+     * Fetch event tags (e.g. "crypto", "politics") from the Gamma API /events endpoint.
+     * Cached 24h on success, 1h on failure.
+     *
+     * @return string[] Array of tag slugs, e.g. ['crypto', 'finance', 'business']
+     */
+    public function getEventTags(string $eventSlug): array
+    {
+        $cacheKey = "event_tags:{$eventSlug}";
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->get('https://gamma-api.polymarket.com/events', [
+                    'slug' => $eventSlug,
+                ]);
+
+            if ($response->successful()) {
+                $events = $response->json();
+                if (! empty($events) && is_array($events)) {
+                    $event = $events[0];
+                    $tags = [];
+                    foreach ($event['tags'] ?? [] as $tag) {
+                        if (isset($tag['slug'])) {
+                            $tags[] = $tag['slug'];
+                        }
+                    }
+                    Cache::put($cacheKey, $tags, 86400);
+
+                    return $tags;
+                }
+            }
+
+            Cache::put($cacheKey, [], 3600);
+
+            return [];
+        } catch (\Throwable $e) {
+            Cache::put($cacheKey, [], 3600);
+
+            return [];
         }
     }
 

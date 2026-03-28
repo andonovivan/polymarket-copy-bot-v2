@@ -127,6 +127,16 @@ class TradeCopier
             return false;
         }
 
+        // --- Market category filter (BUY only) ---
+        if ($trade->side === 'BUY' && $this->isCategoryBlocked($trade->assetId)) {
+            Log::info('skipped_category_filter', [
+                'trade_id' => $trade->tradeId,
+                'asset_id' => $trade->assetId,
+            ]);
+
+            return false;
+        }
+
         // --- Size calculation ---
         if ($trade->side === 'SELL') {
             $position = Position::where('asset_id', $trade->assetId)->first();
@@ -732,6 +742,50 @@ class TradeCopier
      * Compute the USDC amount for a BUY trade.
      *
      * If fixed_amount_override is set, uses that for all trades (bypasses dynamic sizing).
+     * Check if a market's category is disabled via Settings.
+     * Returns true if the market belongs to a disabled category.
+     * Returns false (allow) if metadata/tags are unavailable or no category matches.
+     */
+    private function isCategoryBlocked(string $assetId): bool
+    {
+        // Quick bail: check if any category is actually disabled.
+        $categoryKeys = ['crypto', 'politics', 'sports', 'pop_culture', 'business', 'science'];
+        $disabledCategories = [];
+        foreach ($categoryKeys as $cat) {
+            if (! Setting::get("category_{$cat}", true)) {
+                $disabledCategories[] = $cat;
+            }
+        }
+
+        if (empty($disabledCategories)) {
+            return false;
+        }
+
+        // Fetch metadata (usually cached).
+        $meta = $this->client->getMarketMetadata($assetId);
+        if (! $meta || empty($meta['tags'])) {
+            return false; // Allow unknown/untagged markets.
+        }
+
+        // Map tags to categories and check if any match a disabled category.
+        $tagMapping = config('polymarket.market_category_tags', []);
+        foreach ($disabledCategories as $category) {
+            $categoryTags = $tagMapping[$category] ?? [];
+            if (! empty(array_intersect($meta['tags'], $categoryTags))) {
+                Log::debug('category_blocked', [
+                    'asset_id' => $assetId,
+                    'category' => $category,
+                    'tags' => $meta['tags'],
+                ]);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Otherwise uses the wallet's composite score + available balance hybrid model.
      *
      * Tiers: score 70+ (high), 50-69 (mid), 30-49 (low), <30 or no score (fallback to fixed).

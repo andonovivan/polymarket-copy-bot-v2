@@ -63,4 +63,22 @@ return [
     'discover_category' => env('POLYMARKET_DISCOVER_CATEGORY', 'OVERALL'),
     'discover_limit' => (int) env('POLYMARKET_DISCOVER_LIMIT', 20),
     'discover_max_auto_add' => (int) env('POLYMARKET_DISCOVER_MAX_AUTO_ADD', 3),
+
+    // Market category filters — set to false to skip new BUY trades in that category.
+    'category_crypto' => env('POLYMARKET_CATEGORY_CRYPTO', true),
+    'category_politics' => env('POLYMARKET_CATEGORY_POLITICS', true),
+    'category_sports' => env('POLYMARKET_CATEGORY_SPORTS', true),
+    'category_pop_culture' => env('POLYMARKET_CATEGORY_POP_CULTURE', true),
+    'category_business' => env('POLYMARKET_CATEGORY_BUSINESS', true),
+    'category_science' => env('POLYMARKET_CATEGORY_SCIENCE', true),
+
+    // Mapping of category keys to Polymarket event tag slugs.
+    'market_category_tags' => [
+        'crypto' => ['crypto', 'airdrops'],
+        'politics' => ['politics', 'geopolitics', 'elections', 'global-elections', 'us-presidential-election', 'world-elections', 'midterms', 'primaries'],
+        'sports' => ['sports', 'nba', 'nfl', 'mlb', 'soccer', 'football', 'baseball', 'basketball', 'tennis', 'hockey', 'mma', 'boxing', 'f1', 'golf'],
+        'pop_culture' => ['pop-culture', 'entertainment', 'celebrity'],
+        'business' => ['finance', 'business', 'economy', 'stocks', 'tech', 'ipos'],
+        'science' => ['science', 'weather', 'climate'],
+    ],
 ];

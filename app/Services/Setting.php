@@ -60,6 +60,14 @@ class Setting
         'auto_pause_rolling_expectancy_trades' => ['type' => 'int', 'label' => 'Rolling Expectancy Window', 'group' => 'auto_pause'],
         'auto_pause_min_profit_factor' => ['type' => 'float', 'label' => 'Min Profit Factor', 'group' => 'auto_pause'],
         'auto_pause_profit_factor_min_trades' => ['type' => 'int', 'label' => 'Profit Factor Min Trades', 'group' => 'auto_pause'],
+
+        // Market Categories
+        'category_crypto' => ['type' => 'bool', 'label' => 'Crypto', 'group' => 'categories'],
+        'category_politics' => ['type' => 'bool', 'label' => 'Politics', 'group' => 'categories'],
+        'category_sports' => ['type' => 'bool', 'label' => 'Sports', 'group' => 'categories'],
+        'category_pop_culture' => ['type' => 'bool', 'label' => 'Pop Culture', 'group' => 'categories'],
+        'category_business' => ['type' => 'bool', 'label' => 'Business & Finance', 'group' => 'categories'],
+        'category_science' => ['type' => 'bool', 'label' => 'Science & Weather', 'group' => 'categories'],
     ];
 
     /**
