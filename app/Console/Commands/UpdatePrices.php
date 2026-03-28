@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Models\BotMeta;
+use App\Models\PnlSnapshot;
+use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Services\PolymarketClient;
 use App\Services\Setting;
@@ -78,6 +80,36 @@ class UpdatePrices extends Command
                     $updated++;
                 }
             }
+        }
+
+        // --- P&L snapshot (every 30 minutes) ---
+        $lastSnapshot = BotMeta::getValue('last_pnl_snapshot_ts');
+        if (! $lastSnapshot || (time() - (int) $lastSnapshot) >= 1800) {
+            $snapPositions = Position::where('shares', '>', 0);
+            $posData = $snapPositions
+                ->selectRaw('COALESCE(SUM(buy_price * shares), 0) as invested')
+                ->selectRaw('COALESCE(SUM(CASE WHEN current_price IS NOT NULL THEN current_price * shares ELSE buy_price * shares END), 0) as value')
+                ->selectRaw('COALESCE(SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END), 0) as unrealized')
+                ->selectRaw('COUNT(*) as count')
+                ->first();
+
+            $realized = (float) PnlSummary::singleton()->total_realized;
+            $unrealized = round((float) $posData->unrealized, 4);
+
+            PnlSnapshot::create([
+                'realized_pnl' => $realized,
+                'unrealized_pnl' => $unrealized,
+                'combined_pnl' => round($realized + $unrealized, 4),
+                'positions_value' => round((float) $posData->value, 4),
+                'total_invested' => round((float) $posData->invested, 4),
+                'open_positions' => (int) $posData->count,
+                'recorded_at' => now(),
+            ]);
+
+            BotMeta::setValue('last_pnl_snapshot_ts', (string) time());
+
+            // Prune snapshots older than 90 days.
+            PnlSnapshot::where('recorded_at', '<', now()->subDays(90))->delete();
         }
 
         // --- Take-profit / Stop-loss auto-exits ---

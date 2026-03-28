@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import BalanceBar from '../Components/BalanceBar.vue';
+import PnlChart from '../Components/PnlChart.vue';
 import StatsCards from '../Components/StatsCards.vue';
 import StatsFilter from '../Components/StatsFilter.vue';
 import ActivityTable from '../Components/ActivityTable.vue';
@@ -228,6 +229,7 @@ function fmtTime(ts) {
             <!-- Dashboard Tab -->
             <div v-if="activeTab === 'dashboard'">
                 <BalanceBar v-if="data" :data="data" @refresh="refresh" />
+                <PnlChart :refreshTrigger="dashboardRefresh" />
                 <StatsFilter :refreshTrigger="dashboardRefresh" @change="onFilterChange" />
                 <StatsCards v-if="displayData" :data="displayData" />
 
