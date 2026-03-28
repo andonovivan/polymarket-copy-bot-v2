@@ -29,19 +29,27 @@ class Setting
         'sizing_mid_max' => ['type' => 'float', 'label' => 'Mid Score Max (USDC)', 'group' => 'sizing'],
         'sizing_low_pct' => ['type' => 'float', 'label' => 'Low Score (30-49) %', 'group' => 'sizing'],
         'sizing_low_max' => ['type' => 'float', 'label' => 'Low Score Max (USDC)', 'group' => 'sizing'],
+        'use_kelly_sizing' => ['type' => 'bool', 'label' => 'Use Kelly Criterion Sizing', 'group' => 'sizing'],
+        'kelly_fraction_multiplier' => ['type' => 'float', 'label' => 'Kelly Fraction Multiplier', 'group' => 'sizing'],
+        'kelly_min_trades' => ['type' => 'int', 'label' => 'Kelly Min Trades', 'group' => 'sizing'],
 
         // Risk Limits
         'max_position_usdc' => ['type' => 'float', 'label' => 'Max Per-Market Exposure (USDC)', 'group' => 'limits'],
         'max_wallet_exposure_usdc' => ['type' => 'float', 'label' => 'Max Per-Wallet Exposure (USDC)', 'group' => 'limits'],
+        'max_global_market_usdc' => ['type' => 'float', 'label' => 'Max Global Per-Market Exposure (USDC)', 'group' => 'limits'],
         'price_tolerance' => ['type' => 'float', 'label' => 'Price Tolerance', 'group' => 'limits'],
         'min_trade_price' => ['type' => 'float', 'label' => 'Min Trade Price', 'group' => 'limits'],
 
         // Trade Behavior
         'max_trade_age_seconds' => ['type' => 'int', 'label' => 'Max Trade Age (sec)', 'group' => 'behavior'],
+        'momentum_filter' => ['type' => 'bool', 'label' => 'Momentum Confirmation Filter', 'group' => 'behavior'],
         'copy_sells' => ['type' => 'bool', 'label' => 'Copy Sell Trades', 'group' => 'behavior'],
         'dry_run' => ['type' => 'bool', 'label' => 'Dry Run Mode', 'group' => 'behavior'],
         'pending_order_ttl_minutes' => ['type' => 'int', 'label' => 'Pending Order TTL (min)', 'group' => 'behavior'],
         'trade_coalesce_window_seconds' => ['type' => 'int', 'label' => 'Trade Coalesce Window (sec)', 'group' => 'behavior'],
+        'enable_tp_sl' => ['type' => 'bool', 'label' => 'Take-Profit / Stop-Loss', 'group' => 'behavior'],
+        'tp_percentage' => ['type' => 'float', 'label' => 'Take-Profit %', 'group' => 'behavior'],
+        'sl_percentage' => ['type' => 'float', 'label' => 'Stop-Loss %', 'group' => 'behavior'],
 
         // Polling
         'poll_batch_size' => ['type' => 'int', 'label' => 'Poll Batch Size', 'group' => 'polling'],

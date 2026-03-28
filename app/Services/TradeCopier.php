@@ -153,6 +153,23 @@ class TradeCopier
             return false;
         }
 
+        // --- Fetch midpoint (used by momentum filter + price tolerance) ---
+        $midpoint = $this->client->getMidpoint($trade->assetId);
+
+        // --- Momentum confirmation filter (BUY only) ---
+        if ($trade->side === 'BUY' && Setting::get('momentum_filter', true) && $midpoint !== null) {
+            if ($midpoint < $trade->price) {
+                Log::info('skipped_momentum', [
+                    'trade_id' => $trade->tradeId,
+                    'asset_id' => $trade->assetId,
+                    'trade_price' => $trade->price,
+                    'midpoint' => $midpoint,
+                ]);
+
+                return false;
+            }
+        }
+
         // --- Size calculation ---
         if ($trade->side === 'SELL') {
             $position = Position::where('asset_id', $trade->assetId)->first();
@@ -176,7 +193,6 @@ class TradeCopier
         }
 
         // --- Price tolerance ---
-        $midpoint = $this->client->getMidpoint($trade->assetId);
         if ($midpoint !== null) {
             $deviation = abs($midpoint - $trade->price);
             if ($deviation > Setting::get('price_tolerance', 0.03)) {
@@ -268,6 +284,39 @@ class TradeCopier
             }
         }
 
+        // --- Global per-market exposure cap (BUY only) ---
+        if ($trade->side === 'BUY') {
+            $maxGlobalMarket = (float) Setting::get('max_global_market_usdc', 30.0);
+            if ($maxGlobalMarket > 0) {
+                $marketSlug = $position?->market_slug
+                    ?? $this->client->getMarketSlug($trade->assetId);
+
+                if ($marketSlug) {
+                    $globalPositionExposure = (float) Position::where('market_slug', $marketSlug)
+                        ->where('shares', '>', 0)
+                        ->sum(DB::raw('buy_price * shares'));
+
+                    $globalPendingExposure = (float) PendingOrder::pending()
+                        ->where('market_slug', $marketSlug)
+                        ->where('side', 'BUY')
+                        ->sum('amount_usdc');
+
+                    if ($globalPositionExposure + $globalPendingExposure + $tradeAmountUsdc > $maxGlobalMarket) {
+                        Log::warning('global_market_cap_reached', [
+                            'trade_id' => $trade->tradeId,
+                            'market_slug' => $marketSlug,
+                            'global_position_exposure' => round($globalPositionExposure, 2),
+                            'global_pending_exposure' => round($globalPendingExposure, 2),
+                            'would_add' => $tradeAmountUsdc,
+                            'cap' => $maxGlobalMarket,
+                        ]);
+
+                        return false;
+                    }
+                }
+            }
+        }
+
         // --- Place order ---
         $result = $this->client->placeOrder($trade->assetId, $trade->side, $trade->price, $fixedSize);
         if ($result === null) {
@@ -317,7 +366,7 @@ class TradeCopier
             'size' => $fixedSize,
             'amount_usdc' => $trade->side === 'BUY' ? round($trade->price * $fixedSize, 4) : null,
             'copied_from_wallet' => $trade->wallet,
-            'market_slug' => null, // Will be fetched when/if the order fills.
+            'market_slug' => $this->client->getMarketSlug($trade->assetId),
             'status' => $status,
             'placed_at' => now(),
         ]);
@@ -666,6 +715,14 @@ class TradeCopier
             $position->buy_price = $fillPrice;
         }
 
+        // Set take-profit / stop-loss prices based on current buy price.
+        if (Setting::get('enable_tp_sl', true)) {
+            $tpPct = (float) Setting::get('tp_percentage', 20);
+            $slPct = (float) Setting::get('sl_percentage', 15);
+            $position->tp_price = round($position->buy_price * (1 + $tpPct / 100), 8);
+            $position->sl_price = round($position->buy_price * (1 - $slPct / 100), 8);
+        }
+
         $position->save();
     }
 
@@ -685,6 +742,8 @@ class TradeCopier
             $position->shares = 0;
             $position->buy_price = 0;
             $position->opened_at = null;
+            $position->tp_price = null;
+            $position->sl_price = null;
             $position->save();
         }
     }
@@ -837,11 +896,53 @@ class TradeCopier
             return $fallback;
         }
 
+        $sizingMin = (float) Setting::get('sizing_min', 1.0);
+
+        // --- Kelly Criterion sizing (if enabled) ---
+        if (Setting::get('use_kelly_sizing', false)) {
+            $kellyFraction = (new WalletScoring)->computeKellyFraction($walletAddress);
+
+            if ($kellyFraction !== null) {
+                $multiplier = (float) Setting::get('kelly_fraction_multiplier', 0.5);
+                $adjustedFraction = $kellyFraction * $multiplier;
+                $sizingMax = (float) Setting::get('sizing_high_max', 10.0);
+
+                if ($adjustedFraction <= 0) {
+                    Log::info('kelly_no_edge', [
+                        'wallet' => substr($walletAddress, 0, 10) . '...',
+                        'kelly_raw' => round($kellyFraction, 4),
+                    ]);
+
+                    return $sizingMin;
+                }
+
+                $amount = $available * $adjustedFraction;
+                $amount = max($sizingMin, min($sizingMax, $amount));
+
+                Log::info('kelly_sizing', [
+                    'wallet' => substr($walletAddress, 0, 10) . '...',
+                    'kelly_raw' => round($kellyFraction, 4),
+                    'multiplier' => $multiplier,
+                    'adjusted_fraction' => round($adjustedFraction, 4),
+                    'available' => round($available, 2),
+                    'raw_amount' => round($available * $adjustedFraction, 2),
+                    'capped_amount' => round($amount, 2),
+                ]);
+
+                return round($amount, 2);
+            }
+
+            Log::info('kelly_insufficient_data', [
+                'wallet' => substr($walletAddress, 0, 10) . '...',
+            ]);
+            // Fall through to tier-based sizing.
+        }
+
+        // --- Tier-based sizing (fallback) ---
+
         // Get wallet's composite score.
         $scores = (new WalletScoring)->compute([$walletAddress]);
         $score = $scores[$walletAddress]['composite_score'] ?? null;
-
-        $sizingMin = (float) Setting::get('sizing_min', 1.0);
 
         if ($score === null || $score < 30) {
             // No score or very low — use fixed amount as fallback.

@@ -11,9 +11,11 @@ return [
     'fixed_amount_usdc' => (float) env('POLYMARKET_FIXED_AMOUNT_USDC', 2.0),
     'max_position_usdc' => (float) env('POLYMARKET_MAX_POSITION_USDC', 10.0),
     'max_wallet_exposure_usdc' => (float) env('POLYMARKET_MAX_WALLET_EXPOSURE_USDC', 20.0),
+    'max_global_market_usdc' => (float) env('POLYMARKET_MAX_GLOBAL_MARKET_USDC', 30.0),
     'price_tolerance' => (float) env('POLYMARKET_PRICE_TOLERANCE', 0.03),
     'min_trade_price' => (float) env('POLYMARKET_MIN_TRADE_PRICE', 0.05),
     'max_trade_age_seconds' => (int) env('POLYMARKET_MAX_TRADE_AGE_SECONDS', 30),
+    'momentum_filter' => env('POLYMARKET_MOMENTUM_FILTER', true),
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
     'poll_interval_seconds' => (int) env('POLYMARKET_POLL_INTERVAL_SECONDS', 30),
     'poll_batch_size' => (int) env('POLYMARKET_POLL_BATCH_SIZE', 15),
@@ -23,6 +25,11 @@ return [
     'inactive_wallet_days' => (int) env('POLYMARKET_INACTIVE_WALLET_DAYS', 3),
     'inactive_poll_interval_seconds' => (int) env('POLYMARKET_INACTIVE_POLL_INTERVAL_SECONDS', 3600),
     'pending_order_ttl_minutes' => (int) env('POLYMARKET_PENDING_ORDER_TTL_MINUTES', 10),
+
+    // Take-profit / Stop-loss — auto-close positions at thresholds.
+    'enable_tp_sl' => env('POLYMARKET_ENABLE_TP_SL', true),
+    'tp_percentage' => (float) env('POLYMARKET_TP_PERCENTAGE', 20),
+    'sl_percentage' => (float) env('POLYMARKET_SL_PERCENTAGE', 15),
 
     // Auto-pause thresholds — wallet is paused if ANY rule triggers.
     // Grace period: skip ALL rules until wallet has at least N closed trades.
@@ -56,6 +63,11 @@ return [
     'sizing_low_pct' => (float) env('POLYMARKET_SIZING_LOW_PCT', 0.15),
     'sizing_low_max' => (float) env('POLYMARKET_SIZING_LOW_MAX', 3.0),
     'sizing_min' => (float) env('POLYMARKET_SIZING_MIN', 1.0),
+
+    // Kelly Criterion sizing — mathematically optimal bet sizing based on wallet edge.
+    'use_kelly_sizing' => env('POLYMARKET_USE_KELLY_SIZING', false),
+    'kelly_fraction_multiplier' => (float) env('POLYMARKET_KELLY_FRACTION_MULTIPLIER', 0.5),
+    'kelly_min_trades' => (int) env('POLYMARKET_KELLY_MIN_TRADES', 20),
 
     // Wallet discovery — auto-discover top traders from the leaderboard.
     'discover_min_pnl' => (float) env('POLYMARKET_DISCOVER_MIN_PNL', 500),

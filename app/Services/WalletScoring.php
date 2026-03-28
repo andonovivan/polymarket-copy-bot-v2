@@ -183,6 +183,53 @@ class WalletScoring
         return max(0, min(100, $scaled));
     }
 
+    /**
+     * Compute the Kelly Criterion optimal fraction for a single wallet.
+     *
+     * Returns the raw (full) Kelly fraction. The caller applies the
+     * half-Kelly multiplier from settings. Returns null if insufficient
+     * trade history (falls back to tier-based sizing).
+     */
+    public function computeKellyFraction(string $walletAddress): ?float
+    {
+        $minTrades = (int) Setting::get('kelly_min_trades', 20);
+
+        $pnls = DB::table('trade_history')
+            ->where('copied_from_wallet', $walletAddress)
+            ->pluck('pnl')
+            ->map(fn ($v) => (float) $v)
+            ->all();
+
+        if (count($pnls) < $minTrades) {
+            return null;
+        }
+
+        $wins = array_filter($pnls, fn ($p) => $p >= 0);
+        $losses = array_filter($pnls, fn ($p) => $p < 0);
+
+        if (empty($wins)) {
+            return 0.0;
+        }
+
+        $winRate = count($wins) / count($pnls);
+
+        if (empty($losses)) {
+            return min(1.0, $winRate);
+        }
+
+        $avgWin = array_sum(array_map('abs', $wins)) / count($wins);
+        $avgLoss = array_sum(array_map('abs', $losses)) / count($losses);
+
+        if ($avgLoss == 0) {
+            return min(1.0, $winRate);
+        }
+
+        $b = $avgWin / $avgLoss;
+        $kelly = $winRate - (1 - $winRate) / $b;
+
+        return max(0.0, min(1.0, $kelly));
+    }
+
     private function compositeScore(
         ?float $profitFactor,
         ?float $rollingExpectancy,

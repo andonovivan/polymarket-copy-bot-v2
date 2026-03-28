@@ -6,8 +6,10 @@ use App\Models\BotMeta;
 use App\Models\Position;
 use App\Services\PolymarketClient;
 use App\Services\Setting;
+use App\Services\TradeCopier;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class UpdatePrices extends Command
 {
@@ -74,6 +76,37 @@ class UpdatePrices extends Command
                     $position->price_updated_at = $now;
                     $position->save();
                     $updated++;
+                }
+            }
+        }
+
+        // --- Take-profit / Stop-loss auto-exits ---
+        if (Setting::get('enable_tp_sl', true)) {
+            $copier = app(TradeCopier::class);
+            // Re-read positions after price updates to get fresh current_price values.
+            $activePositions = Position::where('shares', '>', 0)->get();
+
+            foreach ($activePositions as $pos) {
+                if ($pos->current_price === null) {
+                    continue;
+                }
+
+                if ($pos->tp_price && $pos->current_price >= $pos->tp_price) {
+                    Log::info('tp_exit_triggered', [
+                        'asset_id' => $pos->asset_id,
+                        'buy_price' => $pos->buy_price,
+                        'current_price' => $pos->current_price,
+                        'tp_price' => $pos->tp_price,
+                    ]);
+                    $copier->closePosition($pos->asset_id);
+                } elseif ($pos->sl_price && $pos->current_price <= $pos->sl_price) {
+                    Log::info('sl_exit_triggered', [
+                        'asset_id' => $pos->asset_id,
+                        'buy_price' => $pos->buy_price,
+                        'current_price' => $pos->current_price,
+                        'sl_price' => $pos->sl_price,
+                    ]);
+                    $copier->closePosition($pos->asset_id);
                 }
             }
         }
