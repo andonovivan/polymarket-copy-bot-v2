@@ -112,6 +112,9 @@ async function closePosition(assetId) {
             </button>
         </div>
 
+        <!-- Tab content — min-height prevents layout shift when switching -->
+        <div style="min-height: 400px;">
+
         <!-- Active Positions -->
         <DataTable v-if="activeSubTab === 'active'"
                    ref="positionsRef"
@@ -285,5 +288,7 @@ async function closePosition(assetId) {
                 </div>
             </template>
         </DataTable>
+
+        </div><!-- min-height wrapper -->
     </div>
 </template>

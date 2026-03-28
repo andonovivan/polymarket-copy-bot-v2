@@ -171,7 +171,7 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <div class="relative" style="height: 200px;">
+        <div class="relative overflow-hidden" style="height: 200px;">
             <div v-if="loading && points.length === 0"
                  class="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
                 Loading chart...
