@@ -47,11 +47,13 @@ class DashboardController extends Controller
             ->selectRaw('COUNT(*) as count')
             ->selectRaw('COALESCE(SUM(buy_price * shares), 0) as total_cost')
             ->selectRaw('COALESCE(SUM(CASE WHEN current_price IS NOT NULL THEN (current_price - buy_price) * shares ELSE 0 END), 0) as total_unrealized')
+            ->selectRaw('COALESCE(SUM(CASE WHEN current_price IS NOT NULL THEN current_price * shares ELSE buy_price * shares END), 0) as positions_value')
             ->first();
 
         $openPositionCount = (int) $posStats->count;
         $totalCost = round((float) $posStats->total_cost, 4);
         $totalUnrealized = round((float) $posStats->total_unrealized, 4);
+        $positionsValue = round((float) $posStats->positions_value, 4);
 
         // Realized stats — use PnlSummary singleton when unfiltered, raw query otherwise.
         if ($hasFilters) {
@@ -90,6 +92,19 @@ class DashboardController extends Controller
 
         $winRate = $totalTrades > 0 ? round($winningTrades / $totalTrades * 100, 1) : 0;
 
+        // Biggest single win.
+        $biggestWinQuery = DB::table('trade_history');
+        if (! empty($wallets)) {
+            $biggestWinQuery->whereIn('copied_from_wallet', $wallets);
+        }
+        if (isset($cutoff) && $cutoff) {
+            $biggestWinQuery->where('closed_at', '>=', $cutoff);
+        }
+        $biggestWin = round((float) ($biggestWinQuery->max('pnl') ?? 0), 4);
+
+        // Total predictions (open + closed).
+        $totalPredictions = $openPositionCount + $totalTrades;
+
         return response()->json([
             'open_positions_count' => $openPositionCount,
             'total_unrealized' => $totalUnrealized,
@@ -102,6 +117,9 @@ class DashboardController extends Controller
                 'win_rate' => $winRate,
             ],
             'combined_pnl' => round($totalRealized + $totalUnrealized, 4),
+            'positions_value' => $positionsValue,
+            'biggest_win' => $biggestWin,
+            'total_predictions' => $totalPredictions,
             'polymarket_balance' => BotMeta::getValue('polymarket_balance'),
             'trading_balance' => BotMeta::getValue('trading_balance'),
             'dry_run' => Setting::get('dry_run', true),
