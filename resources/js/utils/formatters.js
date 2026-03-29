@@ -21,13 +21,13 @@ export function shortId(id) {
     return id ? id.slice(0, 8) + '...' + id.slice(-6) : '-';
 }
 
-export function isArbTrade(row) {
+export function isAutoTrade(row) {
     const wallet = row.trader_wallet || row.copied_from_wallet || row.address || '';
-    return wallet.startsWith('arb:');
+    return wallet.startsWith('arb:') || wallet.startsWith('snipe:');
 }
 
 export function traderLabel(row) {
-    if (isArbTrade(row)) return 'Arb Scanner';
+    if (isAutoTrade(row)) return 'Auto Trader';
     const name = row.trader_name || row.name || '';
     if (!name || name.startsWith('0x') || name.length > 20) {
         const addr = row.trader_wallet || row.address || '';
@@ -52,7 +52,7 @@ export function timeAgo(ts) {
 }
 
 export function traderUrl(row) {
-    if (isArbTrade(row)) return null;
+    if (isAutoTrade(row)) return null;
     const slug = row.trader_slug || row.profile_slug;
     if (slug) return `https://polymarket.com/@${slug}`;
     const addr = row.trader_wallet || row.address;

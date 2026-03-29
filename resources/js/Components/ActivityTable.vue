@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import DataTable from './DataTable.vue';
-import { fmtUsd, pnlClass, timeAgo, shortId, traderLabel, traderUrl, marketUrl, isArbTrade } from '../utils/formatters.js';
+import { fmtUsd, pnlClass, timeAgo, shortId, traderLabel, traderUrl, marketUrl, isAutoTrade } from '../utils/formatters.js';
 
 const emit = defineEmits(['refresh']);
 const props = defineProps({
@@ -157,9 +157,9 @@ async function closePosition(assetId) {
             </template>
 
             <template #cell-trader_name="{ row }">
-                <span v-if="isArbTrade(row)"
+                <span v-if="isAutoTrade(row)"
                       class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-900 text-purple-300">
-                    Arb Scanner
+                    Auto Trader
                 </span>
                 <a v-else-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
                    class="text-blue-400 hover:text-blue-300 hover:underline text-sm">
@@ -265,9 +265,9 @@ async function closePosition(assetId) {
 
             <!-- Trader column -->
             <template #cell-trader_name="{ row }">
-                <span v-if="isArbTrade(row)"
+                <span v-if="isAutoTrade(row)"
                       class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-900 text-purple-300">
-                    Arb Scanner
+                    Auto Trader
                 </span>
                 <a v-else-if="traderUrl(row)" :href="traderUrl(row)" target="_blank"
                    class="text-blue-400 hover:text-blue-300 hover:underline text-sm">
