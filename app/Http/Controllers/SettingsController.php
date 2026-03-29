@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BotMeta;
 use App\Models\PendingOrder;
+use App\Models\PnlSnapshot;
 use App\Models\PnlSummary;
 use App\Models\Position;
 use App\Models\SeenTrade;
@@ -108,6 +109,7 @@ class SettingsController extends Controller
         TradeHistory::truncate();
         PendingOrder::truncate();
         SeenTrade::truncate();
+        PnlSnapshot::truncate();
 
         // Reset PnlSummary singleton.
         PnlSummary::query()->update([

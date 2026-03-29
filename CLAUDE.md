@@ -67,7 +67,7 @@ npm run build                    # Build frontend assets
 - **GlobalPauseController** - `POST /api/global-pause` toggles global bot pause state (stored in BotMeta). When paused, both polling and trade copying are skipped.
 - **ArbitrageController** - `GET /api/arbitrage` returns current arbitrage scan results (opportunities list with deviation %).
 - **DiscoverController** - `GET /api/discover` returns leaderboard candidates (with already-tracked flags). `POST /api/discover` adds selected wallets by address array.
-- **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default. `POST /api/reset-data` resets all data (positions, trades, pending orders, seen trades, PnlSummary, BotMeta runtime keys, wallet watermarks) while keeping tracked wallets and settings intact.
+- **SettingsController** - `GET /api/settings` returns all configurable settings with current values, env defaults, and override status. `PUT /api/settings` bulk-updates settings (validated by type). `DELETE /api/settings/{key}` resets a single setting to env default. `POST /api/reset-data` resets all data (positions, trades, pending orders, seen trades, PnlSummary, PnlSnapshots, BotMeta runtime keys, wallet watermarks) while keeping tracked wallets and settings intact.
 
 ### Models (`app/Models/`)
 
