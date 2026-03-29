@@ -82,13 +82,12 @@ class Setting
         'category_science' => ['type' => 'bool', 'label' => 'Science & Weather', 'group' => 'categories'],
         'category_other' => ['type' => 'bool', 'label' => 'Other / Uncategorized', 'group' => 'categories'],
 
-        // Arbitrage Scanner
-        'arb_enabled' => ['type' => 'bool', 'label' => 'Enable Scanner', 'group' => 'arbitrage'],
-        'arb_min_spread' => ['type' => 'float', 'label' => 'Min Spread to Report (%)', 'group' => 'arbitrage'],
-        'arb_auto_trade' => ['type' => 'bool', 'label' => 'Auto-Trade Opportunities', 'group' => 'arbitrage'],
-        'arb_trade_amount' => ['type' => 'float', 'label' => 'Trade Amount (USDC)', 'group' => 'arbitrage'],
-        'arb_min_auto_trade_spread' => ['type' => 'float', 'label' => 'Min Spread to Auto-Trade (%)', 'group' => 'arbitrage'],
-        'arb_tp_sl' => ['type' => 'bool', 'label' => 'Apply TP/SL to Arb Trades', 'group' => 'arbitrage'],
+        // Resolution Sniping
+        'snipe_enabled' => ['type' => 'bool', 'label' => 'Enable Scanner', 'group' => 'sniping'],
+        'snipe_auto_trade' => ['type' => 'bool', 'label' => 'Auto-Trade', 'group' => 'sniping'],
+        'snipe_min_probability' => ['type' => 'float', 'label' => 'Min Probability (0-1)', 'group' => 'sniping'],
+        'snipe_max_hours' => ['type' => 'int', 'label' => 'Max Hours to Resolution', 'group' => 'sniping'],
+        'snipe_trade_amount' => ['type' => 'float', 'label' => 'Trade Amount (USDC)', 'group' => 'sniping'],
     ];
 
     /**

@@ -9,7 +9,7 @@ import ActivityTable from '../Components/ActivityTable.vue';
 import WalletsManager from '../Components/WalletsManager.vue';
 import WalletReport from '../Components/WalletReport.vue';
 import WalletDiscovery from '../Components/WalletDiscovery.vue';
-import ArbitrageScanner from '../Components/ArbitrageScanner.vue';
+import AutoTrader from '../Components/AutoTrader.vue';
 import Settings from '../Components/Settings.vue';
 
 const activeTab = ref('dashboard');
@@ -218,7 +218,7 @@ function fmtTime(ts) {
                 </button>
                 <button @click="activeTab = 'arbitrage'"
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'arbitrage' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
-                    Arbitrage
+                    Auto Trader
                 </button>
                 <button @click="activeTab = 'settings'"
                         :class="['px-5 py-2.5 text-sm border-b-2 -mb-px', activeTab === 'settings' ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-gray-300']">
@@ -255,10 +255,10 @@ function fmtTime(ts) {
                 <WalletDiscovery @refresh="refresh" />
             </div>
 
-            <!-- Arbitrage Tab -->
+            <!-- Auto Trader Tab -->
             <div v-if="activeTab === 'arbitrage'">
-                <h2 class="text-blue-400 text-base mb-3">Arbitrage Scanner</h2>
-                <ArbitrageScanner :refreshTrigger="arbRefresh" />
+                <h2 class="text-blue-400 text-base mb-3">Auto Trader</h2>
+                <AutoTrader :refreshTrigger="arbRefresh" />
             </div>
 
             <!-- Settings Tab -->

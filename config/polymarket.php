@@ -90,13 +90,12 @@ return [
     'category_science' => env('POLYMARKET_CATEGORY_SCIENCE', true),
     'category_other' => env('POLYMARKET_CATEGORY_OTHER', true),
 
-    // Arbitrage scanner — detect mispriced grouped markets.
-    'arb_enabled' => env('POLYMARKET_ARB_ENABLED', true),
-    'arb_min_spread' => (float) env('POLYMARKET_ARB_MIN_SPREAD', 0.02),
-    'arb_auto_trade' => env('POLYMARKET_ARB_AUTO_TRADE', false),
-    'arb_trade_amount' => (float) env('POLYMARKET_ARB_TRADE_AMOUNT', 5.0),
-    'arb_min_auto_trade_spread' => (float) env('POLYMARKET_ARB_MIN_AUTO_TRADE_SPREAD', 0.05),
-    'arb_tp_sl' => env('POLYMARKET_ARB_TP_SL', false),
+    // Resolution sniping — buy high-probability outcomes on markets about to resolve.
+    'snipe_enabled' => env('POLYMARKET_SNIPE_ENABLED', true),
+    'snipe_auto_trade' => env('POLYMARKET_SNIPE_AUTO_TRADE', false),
+    'snipe_min_probability' => (float) env('POLYMARKET_SNIPE_MIN_PROBABILITY', 0.90),
+    'snipe_max_hours' => (int) env('POLYMARKET_SNIPE_MAX_HOURS', 48),
+    'snipe_trade_amount' => (float) env('POLYMARKET_SNIPE_TRADE_AMOUNT', 5.0),
 
     // Mapping of category keys to Polymarket event tag slugs.
     'market_category_tags' => [
