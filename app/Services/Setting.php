@@ -39,6 +39,8 @@ class Setting
         'max_global_market_usdc' => ['type' => 'float', 'label' => 'Max Global Per-Market Exposure (USDC)', 'group' => 'limits'],
         'price_tolerance' => ['type' => 'float', 'label' => 'Price Tolerance', 'group' => 'limits'],
         'min_trade_price' => ['type' => 'float', 'label' => 'Min Trade Price', 'group' => 'limits'],
+        'max_position_high_price_usdc' => ['type' => 'float', 'nullable' => true, 'label' => 'Max Per-Market Exposure for High-Price Buys (≥0.80)', 'group' => 'limits'],
+        'high_price_threshold' => ['type' => 'float', 'label' => 'High-Price Threshold', 'group' => 'limits'],
 
         // Trade Behavior
         'max_trade_age_seconds' => ['type' => 'int', 'label' => 'Max Trade Age (sec)', 'group' => 'behavior'],

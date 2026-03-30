@@ -60,7 +60,13 @@ class TradeCopier
             $isWinner = $market['winner_token'] === $assetId;
 
             $pnl = round(($sellPrice - $buyPrice) * $shares, 4);
-            $outcome = $isWinner ? 'WON' : ($sellPrice > 0 ? 'VOIDED' : 'LOST');
+            if ($isWinner) {
+                $outcome = 'WON';
+            } elseif ($sellPrice > 0) {
+                $outcome = 'VOIDED';
+            } else {
+                $outcome = 'LOST';
+            }
 
             Log::info('resolved_position_closed', [
                 'asset_id' => substr($assetId, 0, 16) . '...',
@@ -276,17 +282,28 @@ class TradeCopier
             ->where('side', 'BUY')
             ->sum('amount_usdc');
 
-        if ($trade->side === 'BUY' && $currentExposure + $pendingExposure + $tradeAmountUsdc > Setting::get('max_position_usdc', 10.0)) {
-            Log::warning('exposure_cap_reached', [
-                'trade_id' => $trade->tradeId,
-                'asset_id' => $trade->assetId,
-                'current' => $currentExposure,
-                'pending' => $pendingExposure,
-                'would_add' => $tradeAmountUsdc,
-                'cap' => Setting::get('max_position_usdc', 10.0),
-            ]);
+        if ($trade->side === 'BUY') {
+            // Use a lower per-market cap for high-priced buys (≥0.80 by default).
+            // These have 86%+ win rate but catastrophic losses when wrong ($0.88 → $0.00).
+            $highPriceThreshold = (float) Setting::get('high_price_threshold', 0.80);
+            $isHighPrice = $trade->price >= $highPriceThreshold;
+            $effectiveCap = $isHighPrice
+                ? (float) Setting::get('max_position_high_price_usdc', 5.0)
+                : (float) Setting::get('max_position_usdc', 10.0);
 
-            return false;
+            if ($currentExposure + $pendingExposure + $tradeAmountUsdc > $effectiveCap) {
+                Log::warning('exposure_cap_reached', [
+                    'trade_id' => $trade->tradeId,
+                    'asset_id' => $trade->assetId,
+                    'current' => $currentExposure,
+                    'pending' => $pendingExposure,
+                    'would_add' => $tradeAmountUsdc,
+                    'cap' => $effectiveCap,
+                    'high_price' => $isHighPrice,
+                ]);
+
+                return false;
+            }
         }
 
         // --- Per-wallet exposure cap (BUY only) ---

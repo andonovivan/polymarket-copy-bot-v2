@@ -15,6 +15,8 @@ return [
     'max_global_market_usdc' => (float) env('POLYMARKET_MAX_GLOBAL_MARKET_USDC', 30.0),
     'price_tolerance' => (float) env('POLYMARKET_PRICE_TOLERANCE', 0.03),
     'min_trade_price' => (float) env('POLYMARKET_MIN_TRADE_PRICE', 0.05),
+    'max_position_high_price_usdc' => (float) env('POLYMARKET_MAX_POSITION_HIGH_PRICE_USDC', 5.0),
+    'high_price_threshold' => (float) env('POLYMARKET_HIGH_PRICE_THRESHOLD', 0.80),
     'max_trade_age_seconds' => (int) env('POLYMARKET_MAX_TRADE_AGE_SECONDS', 30),
     'momentum_filter' => env('POLYMARKET_MOMENTUM_FILTER', true),
     'copy_sells' => env('POLYMARKET_COPY_SELLS', true),
